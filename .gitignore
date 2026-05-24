@@ -1,0 +1,62 @@
+# Paper manuscript (kept local only; not uploaded to this repo)
+main.tex
+main.pdf
+references.bib
+IEEEtran.cls
+IEEEtran.bst
+IEEEabrv.bib
+fig_semantic_packet.pdf
+fig_semantic_tradeoff.pdf
+
+# Working / status docs (local only)
+CLAUDE.md
+PROJECT_STATUS.md
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+*.toc
+*.lof
+*.lot
+*.nav
+*.snm
+*.vrb
+texput.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.pytest_cache/
+.coverage
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Large local datasets (regeneratable from public sources;
+# CIC-IDS-2017 is redistributed under UNB licence terms and
+# must be downloaded directly from the dataset host).
+sim/data/
+*.pkl
+*.h5
+
+# liboqs source checkout (regeneratable, large)
+sim/oqs/
+sim/liboqs/

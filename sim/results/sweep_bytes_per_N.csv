@@ -1,0 +1,17 @@
+dataset,backend,N,bpc_measured,bpc_predicted,diff
+nslkdd,mldsa,8,465.5,455.32,10.175
+nslkdd,mldsa,32,148.84,146.61,2.238
+nslkdd,mldsa,128,69.46,69.43,0.034
+nslkdd,mldsa,512,49.79,50.13,-0.346
+nslkdd,slhdsa,8,1033.88,1025.7,8.175
+nslkdd,slhdsa,32,290.94,289.2,1.738
+nslkdd,slhdsa,128,104.98,105.08,-0.091
+nslkdd,slhdsa,512,58.67,59.04,-0.378
+cicids,mldsa,8,466.38,455.32,11.05
+cicids,mldsa,32,149.38,146.61,2.769
+cicids,mldsa,128,70.09,69.43,0.667
+cicids,mldsa,512,50.79,50.13,0.655
+cicids,slhdsa,8,1034.75,1025.7,9.05
+cicids,slhdsa,32,291.47,289.2,2.269
+cicids,slhdsa,128,105.62,105.08,0.542
+cicids,slhdsa,512,59.67,59.04,0.624

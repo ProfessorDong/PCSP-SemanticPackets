@@ -1,0 +1,17 @@
+attack,policy,backend,N,eta,FAR,coverage,acc_test
+A1_replay,raw,ML-DSA-65,128,0.1,1.0,1.0,0.9987
+A1_replay,semantic,ML-DSA-65,128,0.1,0.0,1.0,0.9987
+A1_replay,signed,ML-DSA-65,128,0.1,1.0,1.0,0.9987
+A1_replay,pcsp,ML-DSA-65,128,0.1,0.0,1.0,0.9987
+A2_model_sub,raw,ML-DSA-65,128,0.1,1.0,1.0,0.9987
+A2_model_sub,semantic,ML-DSA-65,128,0.1,1.0,1.0,0.9987
+A2_model_sub,signed,ML-DSA-65,128,0.1,0.0,1.0,0.9987
+A2_model_sub,pcsp,ML-DSA-65,128,0.1,0.0,1.0,0.9987
+A3_evidence_mismatch,raw,ML-DSA-65,128,0.1,1.0,1.0,0.9987
+A3_evidence_mismatch,semantic,ML-DSA-65,128,0.1,1.0,1.0,0.9987
+A3_evidence_mismatch,signed,ML-DSA-65,128,0.1,0.0,1.0,0.9987
+A3_evidence_mismatch,pcsp,ML-DSA-65,128,0.1,0.0,1.0,0.9987
+A4_stale_context,raw,ML-DSA-65,128,0.1,1.0,1.0,0.9987
+A4_stale_context,semantic,ML-DSA-65,128,0.1,0.0,1.0,0.9987
+A4_stale_context,signed,ML-DSA-65,128,0.1,0.0,1.0,0.9987
+A4_stale_context,pcsp,ML-DSA-65,128,0.1,0.0,1.0,0.9987

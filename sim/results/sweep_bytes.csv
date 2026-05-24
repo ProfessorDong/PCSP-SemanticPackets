@@ -1,0 +1,11 @@
+dataset,backend,N,seed,bytes_per_claim
+nslkdd,ML-DSA-65,128,0,69.46
+nslkdd,ML-DSA-65,128,1,69.52
+nslkdd,ML-DSA-65,128,2,69.49
+nslkdd,ML-DSA-65,128,3,69.68
+nslkdd,ML-DSA-65,128,4,69.52
+cicids,ML-DSA-65,128,0,70.09
+cicids,ML-DSA-65,128,1,70.48
+cicids,ML-DSA-65,128,2,70.85
+cicids,ML-DSA-65,128,3,70.01
+cicids,ML-DSA-65,128,4,70.57
