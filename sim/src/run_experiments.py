@@ -278,7 +278,7 @@ def main():
                 z=int(z_te[i]),
                 c_alpha=tuple(int(c) for c in sets_te[i]),
                 t=t_batch,
-                ctx=int(yte[i] != 0),
+                ctx=int(_sha256(Xte[i].tobytes())[0] & 0x01),
                 H_x=_sha256(Xte[i].tobytes()),
             ))
         batches.append(encode_batch(cs, H_theta, H_D, sig, sk))

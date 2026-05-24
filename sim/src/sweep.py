@@ -212,7 +212,7 @@ def run_far_only(dataset, backend_name, N, seed, eta=0.10,
         cs = [PCSPClaim(
                 z=int(z_te[sl.start + k]),
                 c_alpha=tuple(int(c) for c in sets_te[sl.start + k]),
-                t=b, ctx=int(yte[sl.start + k] != 0),
+                t=b, ctx=int(_sha256(Xte[sl.start + k].tobytes())[0] & 0x01),
                 H_x=_sha256(Xte[sl.start + k].tobytes()))
               for k in range(N)]
         batches.append(encode_batch(cs, H_theta, H_D, sig, sk))
@@ -303,7 +303,8 @@ def run_one(dataset, backend_name, N, seed, eta=0.10, fresh_win=2,
             cs.append(PCSPClaim(
                 z=int(z_te[i]),
                 c_alpha=tuple(int(c) for c in sets_te[i]),
-                t=b, ctx=int(yte[i] != 0),
+                t=b,
+                ctx=int(_sha256(Xte[i].tobytes())[0] & 0x01),
                 H_x=_sha256(Xte[i].tobytes()),
             ))
         t0 = time.time()

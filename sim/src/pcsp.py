@@ -72,10 +72,12 @@ class StubBackend(SigBackend):
 
 
 class DilithiumPyBackend(SigBackend):
-    """Real ML-DSA-65 (Dilithium-Mode3) via the pure-Python
-    `dilithium_py` package.  Signature size matches FIPS 204 (3293 B);
-    verify latency is ~50-100x slower than a C/AVX2 implementation
-    such as liboqs but produces identical signatures."""
+    """Real ML-DSA-65 via the pure-Python `dilithium_py` package.
+    Byte sizes match FIPS 204 (signature 3309 B, pk 1952 B); verify
+    latency is ~50-100x slower than a C/AVX2 implementation such as
+    liboqs but produces byte-identical signatures.  Note: this
+    pure-Python implementation is byte-format conformant with FIPS 204
+    but is NOT FIPS 140 validated and is NOT side-channel hardened."""
 
     name = "ML-DSA-65"
 
@@ -243,12 +245,19 @@ class PCSPBatch:
 # Encoder / verifier
 # ---------------------------------------------------------------------------
 
+_LEAF_TAG = b"PCSP-leaf-v1"
+_NODE_TAG = b"PCSP-node-v1"
+
+
 def claim_leaf(c: PCSPClaim) -> bytes:
-    """Hash of a single PCSPClaim (Merkle leaf input)."""
+    """Hash of a single PCSPClaim (Merkle leaf input).
+    Domain-separated by _LEAF_TAG and length-prefixed so that no
+    two distinct PCSPClaims map to the same leaf hash."""
     return _sha256(
-        struct.pack(">BHIH", c.z & 0xff, c.t & 0xffff,
-                    c.ctx & 0xffff_ffff,
-                    len(c.c_alpha) & 0xffff)
+        _LEAF_TAG
+        + struct.pack(">BHIH", c.z & 0xff, c.t & 0xffff,
+                       c.ctx & 0xffff_ffff,
+                       len(c.c_alpha) & 0xffff)
         + bytes(c.c_alpha)
         + c.H_x
     )
