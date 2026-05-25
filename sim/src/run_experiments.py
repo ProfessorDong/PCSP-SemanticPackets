@@ -40,7 +40,7 @@ from pcsp import (PCSPClaim, encode_batch, verify_batch, packet_bytes,
 # experiment runs under a stub backend.
 PQC_SIG_BYTES = {
     "STUB":              16,
-    "ML-DSA-65":         3293,
+    "ML-DSA-65":         3309,   # FIPS 204 spec; dilithium_py produces exactly this
     "SLH-DSA-SHA2-128s": 7856,
 }
 PQC_PK_BYTES = {

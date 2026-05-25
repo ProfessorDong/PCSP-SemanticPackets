@@ -19,25 +19,33 @@ not hosted here.
 
 * **PCSP packet construction** — each semantic claim is bound to
   compact cryptographic evidence about provenance, freshness, model
-  identity, uncertainty, and authorisation, then signed under a
+  identity, uncertainty, and authorization, then signed under a
   post-quantum signature scheme.
-* **Theorem 1 (Soundness)** — under conformal calibration of the
-  classifier, EUF-CMA security of the signature, and
-  collision-resistance of the commitment hash, the receiver's
-  false-accept rate against any computationally bounded adversary is
-  at most $\alpha + \mathrm{negl}(\lambda)$.
+* **Theorem 1 (Receiver-Side Soundness)** — for an exchangeable
+  deployment sample $(X,Y)$ independent of the adversary's
+  selection rule, under conformal calibration (coverage $1-\alpha$),
+  EUF-CMA security of the signature, and collision-resistance of
+  the commitment hash, the joint certificate-validity failure rate
+  $\Pr[\mathsf{Acc}\wedge Y\notin C_\alpha(X)]$ against any
+  computationally bounded adversary is at most
+  $\alpha + \mathrm{negl}(\lambda)$.
 * **Theorem 2 (Bandwidth-Saving Regime)** — aggregating $N$ semantic
   claims under one signature drives the per-claim cryptographic
-  overhead to $O(1/N)$ and yields an explicit break-even batch size
-  $N^\star = (B_p + B_s) / (B_x - B_\mathrm{sem})$.
-* **Real PQC + real data** — measurements with FIPS-204-conformant
-  ML-DSA-65 (`dilithium_py`) and FIPS-205-conformant SLH-DSA-SHA2-128s
-  (`pyspx`) over the public NSL-KDD and CIC-IDS-2017 datasets.
-* **Empirical headline** — FAR $= 0.000$ on every attack class
-  (replay, model substitution, evidence mismatch, stale context) at
-  $N{=}128$ with $6.8\times$ compression vs raw flow records
-  (ML-DSA-65) and $4.5\times$ (SLH-DSA-SHA2-128s); verification
-  latency $0.72$–$5.17$ ms per packet on a single CPU core.
+  overhead to $O(1/N)$ and yields explicit break-even
+  $N^\star = (B_p + B_s + 2B_H) / (B_x - B_\mathrm{sem})$.
+* **Real PQC + real data** — measurements with byte-format
+  FIPS-204-conformant ML-DSA-65 (3309 B, `dilithium_py`) and
+  FIPS-205-conformant SLH-DSA-SHA2-128s (7856 B, `pyspx`) over the
+  public NSL-KDD and CIC-IDS-2017 datasets. Note: ML-DSA-65 is NIST
+  security category 3; SLH-DSA-SHA2-128s is category 1, included as
+  the smallest stateless hash-based baseline (not security-matched).
+* **Empirical headline** — gate-bypass rate $0/n$ on all four attack
+  classes (replay, rogue-key model substitution, evidence-leaf
+  tampering, epoch rollback) with rule-of-three 95% upper bound below
+  $7\times10^{-5}$; APS coverage 99.7% (NSL-KDD) and 100%
+  (CIC-IDS-2017) at $\alpha=10\%$; NSL-KDD compression
+  $6.8\times$ (ML-DSA-65) and $4.5\times$ (SLH-DSA-SHA2-128s) at
+  $N=128$; verification latency $0.72$–$5.17$ ms per packet.
 
 ## Layout
 
