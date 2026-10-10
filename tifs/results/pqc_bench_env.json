@@ -1,0 +1,95 @@
+{
+  "timestamp": "2026-10-10T16:54:06-0500",
+  "cpu_model": "12th Gen Intel(R) Core(TM) i7-12700KF",
+  "pinned_core": 2,
+  "core_thread_siblings": "2-3",
+  "scaling_governor": "powersave",
+  "scaling_driver": "intel_pstate",
+  "energy_perf_preference": "performance",
+  "cpuinfo_max_freq_khz": "4900000",
+  "intel_no_turbo": "0",
+  "kernel": "6.11.0-29-generic",
+  "uname": "Linux Ramblewood4090Down 6.11.0-29-generic #29~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Thu Jun 26 14:16:59 UTC 2 x86_64 x86_64",
+  "python": "3.12.13 | packaged by Anaconda, Inc. | (main, Mar 19 2026, 20:20:58) [GCC 14.3.0]",
+  "liboqs_version": "0.16.0",
+  "liboqs_python_version": "0.16.0.1",
+  "liboqs_build": "shared, Release, OQS_DIST_BUILD=ON (runtime CPU dispatch), OQS_USE_OPENSSL=OFF, gcc 13.3.0",
+  "oqs_install_path": ".venv/oqs",
+  "dilithium_py_version": "1.4.0",
+  "pyspx_version": "0.5.0",
+  "cpu_flags_avx2": true,
+  "mechanisms": {
+    "ML-DSA-44": {
+      "liboqs_name": "ML-DSA-44",
+      "pk": 1312,
+      "sk": 2560,
+      "sig": 2420,
+      "nist_level": 2,
+      "version": "FIPS204"
+    },
+    "ML-DSA-65": {
+      "liboqs_name": "ML-DSA-65",
+      "pk": 1952,
+      "sk": 4032,
+      "sig": 3309,
+      "nist_level": 3,
+      "version": "FIPS204"
+    },
+    "ML-DSA-87": {
+      "liboqs_name": "ML-DSA-87",
+      "pk": 2592,
+      "sk": 4896,
+      "sig": 4627,
+      "nist_level": 5,
+      "version": "FIPS204"
+    },
+    "SLH-DSA-SHA2-128s": {
+      "liboqs_name": "SLH_DSA_PURE_SHA2_128S",
+      "pk": 32,
+      "sk": 64,
+      "sig": 7856,
+      "nist_level": 1,
+      "version": "FIPS205"
+    },
+    "SLH-DSA-SHA2-128f": {
+      "liboqs_name": "SLH_DSA_PURE_SHA2_128F",
+      "pk": 32,
+      "sk": 64,
+      "sig": 17088,
+      "nist_level": 1,
+      "version": "FIPS205"
+    },
+    "SLH-DSA-SHA2-192s": {
+      "liboqs_name": "SLH_DSA_PURE_SHA2_192S",
+      "pk": 48,
+      "sk": 96,
+      "sig": 16224,
+      "nist_level": 3,
+      "version": "FIPS205"
+    },
+    "SLH-DSA-SHAKE-128s": {
+      "liboqs_name": "SLH_DSA_PURE_SHAKE_128S",
+      "pk": 32,
+      "sk": 64,
+      "sig": 7856,
+      "nist_level": 1,
+      "version": "FIPS205"
+    },
+    "Falcon-512": {
+      "liboqs_name": "Falcon-512",
+      "pk": 897,
+      "sk": 1281,
+      "sig": 752,
+      "nist_level": 1,
+      "version": "20211101 with PQClean patches"
+    }
+  },
+  "lscpu": "Architecture:                         x86_64\nCPU op-mode(s):                       32-bit, 64-bit\nAddress sizes:                        39 bits physical, 48 bits virtual\nByte Order:                           Little Endian\nCPU(s):                               20\nOn-line CPU(s) list:                  0-19\nVendor ID:                            GenuineIntel\nModel name:                           12th Gen Intel(R) Core(TM) i7-12700KF\nCPU family:                           6\nModel:                                151\nThread(s) per core:                   2\nCore(s) per socket:                   12\nSocket(s):                            1\nStepping:                             2\nCPU(s) scaling MHz:                   26%\nCPU max MHz:                          5000.0000\nCPU min MHz:                          800.0000\nBogoMIPS:                             7219.20\nFlags:                                fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc art arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf tsc_known_freq pni pclmulqdq dtes64 monitor ds_cpl vmx est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm 3dnowprefetch cpuid_fault epb ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid rdseed adx smap clflushopt clwb intel_pt sha_ni xsaveopt xsavec xgetbv1 xsaves split_lock_detect user_shstk avx_vnni dtherm ida arat pln pts hwp hwp_notify hwp_act_window hwp_epp hwp_pkg_req hfi vnmi umip pku ospke waitpkg gfni vaes vpclmulqdq rdpid movdiri movdir64b fsrm md_clear serialize arch_lbr ibt flush_l1d arch_capabilities\nVirtualization:                       VT-x\nL1d cache:                            512 KiB (12 instances)\nL1i cache:                            512 KiB (12 instances)\nL2 cache:                             12 MiB (9 instances)\nL3 cache:                             25 MiB (1 instance)\nNUMA node(s):                         1\nNUMA node0 CPU(s):                    0-19\nVulnerability Gather data sampling:   Not affected\nVulnerability Itlb multihit:          Not affected\nVulnerability L1tf:                   Not affected\nVulnerability Mds:                    Not affected\nVulnerability Meltdown:               Not affected\nVulnerability Mmio stale data:        Not affected\nVulnerability Reg file data sampling: Mitigation; Clear Register File\nVulnerability Retbleed:               Not affected\nVulnerability Spec rstack overflow:   Not affected\nVulnerability Spec store bypass:      Mitigation; Speculative Store Bypass disabled via prctl\nVulnerability Spectre v1:             Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:             Mitigation; Enhanced / Automatic IBRS; IBPB conditional; RSB filling; PBRSB-eIBRS SW sequence; BHI BHI_DIS_S\nVulnerability Srbds:                  Not affected\nVulnerability Tsx async abort:        Not affected",
+  "reps": {
+    "fast": 200,
+    "slow_slh_s": 20,
+    "python_refs": 20,
+    "warmup": 3
+  },
+  "timer": "time.perf_counter, per-call (hash: per-call mean over 1000-call batches)"
+}

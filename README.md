@@ -3,16 +3,41 @@
 **Proof-Carrying Semantic Packets for zero-trust tactical edge networks
 under bandwidth collapse.**
 
-Code and reproducibility artifacts accompanying:
+## Current version: `tifs/` (journal experiments)
 
-> Liang Dong, *"Proof-Carrying Semantic Packets for Zero-Trust
-> Tactical Edge Networks Under Bandwidth Collapse,"* MILCOM 2026
-> (under review).
+`tifs/` holds the current implementation and the measured results for the
+journal version of this work (manuscript in preparation; not hosted here).
+See [`tifs/README.md`](tifs/README.md). Relative to the earlier prototype in
+`sim/`, it
+
+* uses a redesigned wire format (PCSP v2: 3-B claims in set mode, a 53-B
+  signed header, separate RFC 6962 claim and evidence Merkle trees, salted
+  evidence commitments, a signed bundle index and claim counter);
+* implements the RFC 4303-style replay window, real serialization/parsing,
+  and fragment-independent verification;
+* uses valid split-conformal certificates (LAC / randomized APS / Mondrian)
+  and receiver-side, audit-driven adaptive conformal inference;
+* uses the official NSL-KDD `KDDTrain+` file (125,973 records) and all
+  CIC-IDS-2017 days, including a temporal zero-day split;
+* measures FIPS 204 / FIPS 205 signatures from liboqs 0.16.0.
+
+`./tifs/run_all.sh` regenerates every result CSV.
+
+## Earlier prototype: `sim/`
+
+The `sim/` directory is the earlier conference-draft prototype, kept for
+reference. That draft was withdrawn and is not published. Known issues that
+`tifs/` corrects: the non-randomized APS sets over-covered, the NSL-KDD
+training file was not the official release, the Merkle tree duplicated odd
+leaves without signing the batch size, the in-window replay check was not
+implemented, and `pyspx` implements round-3 SPHINCS+, which has the
+SLH-DSA-SHA2-128s signature size but is not FIPS 205. The description below
+refers to `sim/`.
 
 This repository contains the PCSP encoder/verifier, two real
 network-intrusion datasets' loaders, a four-attack adversary, and
 the per-seed sweep scripts that reproduce every reported number,
-table, and figure in the conference paper.  The paper PDF itself is
+table, and figure in the conference draft.  The paper PDF itself is
 not hosted here.
 
 ## Highlights
@@ -126,7 +151,7 @@ If you use this code, please cite:
                 Tactical Edge Networks Under Bandwidth Collapse}},
   booktitle = {Proc. IEEE Military Communications Conference (MILCOM)},
   year      = {2026},
-  note      = {Under review}
+  note      = {Withdrawn draft; not published}
 }
 ```
 

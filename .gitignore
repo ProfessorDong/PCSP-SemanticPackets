@@ -60,3 +60,9 @@ sim/data/
 # liboqs source checkout (regeneratable, large)
 sim/oqs/
 sim/liboqs/
+
+# TIFS journal manuscript (local only; never pushed)
+tifs/paper/
+# Journal figures are manuscript material (regenerate with tifs/src/make_figs.py)
+tifs/figs/
+tifs/results/log_*.txt
