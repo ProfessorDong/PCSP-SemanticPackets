@@ -1,7 +1,7 @@
 # PCSP journal experiments (`tifs/`)
 
 Code and measured results for the journal version of *Proof-Carrying Semantic
-Packets*. The manuscript itself (`tifs/paper/`) is not part of the repository.
+Packets*. The manuscripts (`tifs/paper/`, `tdsc/`) are not part of the repository.
 
 | Script | What it produces |
 |---|---|
@@ -12,6 +12,9 @@ Packets*. The manuscript itself (`tifs/paper/`) is not part of the repository.
 | `src/exp_adversary.py` | `results/e3b_*.csv` (evasion), `e4_selective.csv`, `e5_accountability.csv` |
 | `src/exp_bandwidth.py` | `results/e6_*.csv` (byte accounting, baselines), `e7_*.csv` (erasure links) |
 | `src/exp_latency.py`, `src/bench_pqc.py` | `results/e8_latency.csv`, `results/pqc_bench*.{csv,json}` |
+| `src/exp_tolerance.py` | `results/e9_tolerance.csv`, `results/e9_trace.csv`: compromised sender colluding with the intruder (revocation, timeout quarantine, ACI validity) |
+| `src/make_figs.py`, `src/make_tables.py` | matplotlib figures and LaTeX table bodies |
+| `src/make_tdsc.py`, `src/make_pgfdata.py` | table bodies (incl. tolerance and decision-level performability) and pgfplots data series for the TDSC manuscript |
 
 `./run_all.sh` regenerates everything (about 30 min on one desktop with a GPU;
 XGBoost uses CUDA).

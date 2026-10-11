@@ -7,6 +7,7 @@ import math
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.ticker
 import numpy as np
 import pandas as pd
 
@@ -244,6 +245,37 @@ def fig_accountability():
     save(fig, "fig_accountability")
 
 
+def fig_tolerance():
+    tr = pd.read_csv(RES / "e9_trace.csv")
+    tol = pd.read_csv(RES / "e9_tolerance.csv")
+    fig, axs = plt.subplots(2, 1, figsize=(W1, 2.7), sharex=True)
+    for ax, strat, ttl in [(axs[0], "answer", "insider answers audits"),
+                           (axs[1], "withhold", "insider withholds openings")]:
+        for pol, col, ls, lab in [("static", C2, "--", "static"),
+                                  ("aci", C1, "-", "ACI"),
+                                  ("aci+revoke", C3, "-.",
+                                   "ACI + key action")]:
+            d = tr[(tr.strategy == strat) & (tr.policy == pol)]
+            ax.plot(d.t, d.miscov, color=col, ls=ls, lw=1.1, label=lab)
+        tk = tol[(tol.seed == 0) & (tol.aseed == 0) & (tol.q == 0.01)
+                 & (tol.alpha == 0.01) & (tol.strategy == strat)
+                 & (tol.policy == "aci+revoke")].t_revoke.iloc[0]
+        ax.axvline(tk, color=INK, lw=0.7)
+        ax.text(tk, 3e-4, " key\n action", fontsize=6.5, color=INK,
+                va="center")
+        ax.axhline(0.01, color=INK2, lw=0.8, ls=":")
+        ax.set_yscale("log")
+        ax.set_ylim(1e-4, 1)
+        ax.set_ylabel("miscoverage\n(2k-claim window)")
+        ax.set_title(ttl, fontsize=7, pad=2)
+    axs[0].legend(loc="lower center", ncol=3, fontsize=6.5,
+                  bbox_to_anchor=(0.5, 1.12))
+    axs[1].set_xlabel("claim index $t$ (zero-day stream)")
+    axs[1].xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
+        lambda v, _: f"{v / 1000:.0f}k"))
+    save(fig, "fig_tolerance")
+
+
 if __name__ == "__main__":
     fig_shift_traces()
     fig_q_sweep()
@@ -252,4 +284,5 @@ if __name__ == "__main__":
     fig_bytes()
     fig_channel()
     fig_accountability()
+    fig_tolerance()
     print("ok")

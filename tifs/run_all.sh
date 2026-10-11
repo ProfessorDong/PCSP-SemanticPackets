@@ -13,5 +13,8 @@ $PY exp_conformal.py --part all    # E2 static certificates, E3 shift + ACI
 $PY exp_adversary.py               # E3b evasion, E4 selective fwd, E5 audits
 $PY exp_bandwidth.py               # E6 byte accounting, E7 erasure links
 $PY exp_latency.py                 # E8 end-to-end latency
+$PY exp_tolerance.py               # E9 compromised sender (TDSC version)
 $PY make_figs.py
 $PY make_tables.py
+$PY make_tdsc.py                   # tables of the TDSC manuscript (tdsc/paper/)
+$PY make_pgfdata.py                # data series of the TDSC TikZ/pgfplots figures

@@ -66,3 +66,5 @@ tifs/paper/
 # Journal figures are manuscript material (regenerate with tifs/src/make_figs.py)
 tifs/figs/
 tifs/results/log_*.txt
+# TDSC journal manuscript and IEEE template (local only; never pushed)
+tdsc/
