@@ -193,3 +193,89 @@ def _aci(S, y, cal_sorted, alpha, gamma, audit, delay, a, fb):
             elif fb[s] == 1:
                 a = a + gamma * (alpha - (1.0 if alphas[s] > 0.0 else 0.0))
     return err, size, alphas
+
+
+# ------------------------------------------------- ACI, causal schedule
+
+FB_LABEL, FB_TIMEOUT, FB_SKIP, FB_TIMEOUT_SET = 0, 1, 2, 3
+
+
+def aci_sched(S_stream, y, cal_scores, alpha, gamma, audit, res_time, fb,
+              y_fb=None, alpha0=None):
+    """Audit-driven ACI with an explicit event schedule (Algorithm 1).
+
+    audit    : (T,) audit coins of the accepted claims
+    res_time : (T,) accepted-claim index at which audit u resolves (its
+               label returns or its deadline passes); updates are applied
+               in FIFO order of u once t >= res_time[u]
+    fb       : (T,) FB_LABEL     label returned (error w.r.t. y_fb)
+                    FB_TIMEOUT   opening missing: e_u = 1{alpha_u > 0}
+                    FB_TIMEOUT_SET opening missing: e_u = 1{C_u != Y}
+                    FB_SKIP      ignored (biased; for comparison only)
+    y_fb     : labels returned by the labeling service (default: y); the
+               reported miscoverage is always w.r.t. the true y.
+    Returns (err, size, alphas, D) with D the largest number of audits
+    outstanding at any time, counting the current one."""
+    a0 = alpha if alpha0 is None else alpha0
+    y = np.ascontiguousarray(y, dtype=np.int64)
+    yf = y if y_fb is None else np.ascontiguousarray(y_fb, dtype=np.int64)
+    return _aci_sched(np.ascontiguousarray(S_stream, dtype=np.float64), y, yf,
+                      np.sort(np.asarray(cal_scores, dtype=np.float64)),
+                      float(alpha), float(gamma),
+                      np.ascontiguousarray(audit, dtype=np.bool_),
+                      np.ascontiguousarray(res_time, dtype=np.int64),
+                      np.ascontiguousarray(fb, dtype=np.int8), float(a0))
+
+
+@njit(cache=True)
+def _aci_sched(S, y, yf, cal_sorted, alpha, gamma, audit, res_time, fb, a):
+    T, K = S.shape
+    m = cal_sorted.shape[0]
+    err = np.zeros(T, dtype=np.bool_)
+    size = np.zeros(T, dtype=np.int16)
+    alphas = np.empty(T)
+    errf = np.zeros(T, dtype=np.bool_)
+    q = np.empty(T, dtype=np.int64)        # FIFO of audited indices
+    head, tail, D = 0, 0, 0
+    for t in range(T):
+        alphas[t] = a
+        if a <= 0.0:
+            qh = np.inf
+        elif a >= 1.0:
+            qh = -np.inf
+        else:
+            k = int(np.ceil((m + 1) * (1.0 - a)))
+            qh = np.inf if k > m else cal_sorted[k - 1]
+        top = 0
+        for j in range(1, K):
+            if S[t, j] < S[t, top]:
+                top = j
+        n = 0
+        cov = False
+        covf = False
+        for j in range(K):
+            if S[t, j] <= qh or j == top:
+                n += 1
+                if j == y[t]:
+                    cov = True
+                if j == yf[t]:
+                    covf = True
+        err[t] = not cov
+        errf[t] = not covf
+        size[t] = n
+        if audit[t]:
+            q[tail] = t
+            tail += 1
+        if tail - head > D:
+            D = tail - head
+        while head < tail and res_time[q[head]] <= t:
+            u = q[head]
+            head += 1
+            f = fb[u]
+            if f == 0:
+                a = a + gamma * (alpha - (1.0 if errf[u] else 0.0))
+            elif f == 1:
+                a = a + gamma * (alpha - (1.0 if alphas[u] > 0.0 else 0.0))
+            elif f == 3:
+                a = a + gamma * (alpha - (1.0 if size[u] < K else 0.0))
+    return err, size, alphas, D

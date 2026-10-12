@@ -253,16 +253,17 @@ def fig_tolerance():
                            (axs[1], "withhold", "insider withholds openings")]:
         for pol, col, ls, lab in [("static", C2, "--", "static"),
                                   ("aci", C1, "-", "ACI"),
-                                  ("aci+revoke", C3, "-.",
+                                  ("aci+key", C3, "-.",
                                    "ACI + key action")]:
             d = tr[(tr.strategy == strat) & (tr.policy == pol)]
             ax.plot(d.t, d.miscov, color=col, ls=ls, lw=1.1, label=lab)
         tk = tol[(tol.seed == 0) & (tol.aseed == 0) & (tol.q == 0.01)
                  & (tol.alpha == 0.01) & (tol.strategy == strat)
-                 & (tol.policy == "aci+revoke")].t_revoke.iloc[0]
-        ax.axvline(tk, color=INK, lw=0.7)
-        ax.text(tk, 3e-4, " key\n action", fontsize=6.5, color=INK,
-                va="center")
+                 & (tol.policy == "aci+key")].t_effective.iloc[0]
+        if tk == tk:                      # no key action in this run: NaN
+            ax.axvline(tk, color=INK, lw=0.7)
+            ax.text(tk, 3e-4, " key\n action", fontsize=6.5, color=INK,
+                    va="center")
         ax.axhline(0.01, color=INK2, lw=0.8, ls=":")
         ax.set_yscale("log")
         ax.set_ylim(1e-4, 1)

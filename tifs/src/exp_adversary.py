@@ -74,6 +74,9 @@ def e3b(seeds=range(5), aseeds=range(5)):
         Pca = q8(s["Pca"])
         z = P.argmax(1)
         ev_rate = float(np.mean(~np.isnan(lam)))
+        lam_ok = lam[~np.isnan(lam)]
+        lam_med = float(np.median(lam_ok))
+        lam_full = float(np.mean(lam_ok >= 1.0))
         for a in [0.01, 0.05]:
             cp = C.SplitConformal("lac", False, a, seed).fit(Pca, s["yca"])
             M = cp.sets(P)
@@ -84,7 +87,8 @@ def e3b(seeds=range(5), aseeds=range(5)):
                              miscov_post=err_s[T0:].mean(),
                              size_post=size_s[T0:].mean(),
                              singleton_err_post=((size_s == 1) & err_s)[T0:].mean(),
-                             evaded=ev_rate, n_attack_post=len(atk)))
+                             evaded=ev_rate, n_attack_post=len(atk),
+                             lam_median=lam_med, lam_full=lam_full))
             Sca = 1 - Pca[np.arange(len(s["yca"])), s["yca"]]
             S = 1 - P
             for ase in aseeds:
@@ -102,8 +106,9 @@ def e3b(seeds=range(5), aseeds=range(5)):
                     if seed == 0 and ase == 0 and q == 0.01 and a == 0.01:
                         w = 2000
                         k = np.arange(T)
+                        # trailing (causal) window of the last w claims
                         roll = lambda v: pd.Series(v.astype(float)).rolling(
-                            w, center=True, min_periods=w // 2).mean().to_numpy()
+                            w, min_periods=w).mean().to_numpy()
                         pd.DataFrame(dict(
                             t=k, static=roll(err_s), aci=roll(err),
                             size_aci=roll(size), size_static=roll(size_s),

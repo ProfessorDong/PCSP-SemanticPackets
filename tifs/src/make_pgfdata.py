@@ -35,12 +35,12 @@ def const(name, v, fmt="{:.6g}"):
 
 
 def shift_traces():
+    """Cumulative and trailing-window miscoverage (exp_risk.traces)."""
     for sc, tag in [("cic_zd", "cic"), ("nsl_shift", "nsl")]:
-        st = pd.read_csv(RES / f"e3_trace_{sc}_a0.01_static.csv")
-        dat(f"shift_{tag}_static", st[["t", "run_miscov"]])
-        for q, qt in [(0.01, "a"), (0.05, "b")]:
-            tr = pd.read_csv(RES / f"e3_trace_{sc}_a0.01_q{q}.csv")
-            dat(f"shift_{tag}_q{qt}", tr[["t", "run_miscov"]])
+        tr = pd.read_csv(RES / f"e3d_trace_{sc}.csv")
+        dat(f"shift_{tag}", tr.rename(columns={
+            "cum_static": "cs", "cum_aci0.01": "ca", "cum_aci0.05": "cb",
+            "win_static": "ws", "win_aci0.01": "wa", "win_aci0.05": "wb"}))
 
 
 def q_sweep():
@@ -107,16 +107,38 @@ def bytes_():
 
 
 def channel():
-    c = pd.read_csv(RES / "e7_channel.csv")
-    for eps, et in [(0.05, "a"), (0.10, "b")]:
-        d = c[(c.scheme == "ML-DSA-65") & (c.M == 200) & (c.eps == eps)]
-        for mode, mt in [("MONO", "mono"), ("FIV", "fiv"),
-                         ("FIV+FEC", "fec"), ("FIV+FEC-IL", "il")]:
-            g = d[d["mode"] == mode]
-            dat(f"chan_{et}_{mt}", g[["N", "eff_theory", "eff_mc",
-                                      "eff_mc_ge"]])
-        no = n_opt_mono(3, P.batch_overhead(SIG_BYTES["ML-DSA-65"]), 200, eps)
-        const(f"chanNopt{et}", no)
+    """Set mode, ML-DSA-65, 200-B frames, eps = 0.1 (exp_bandwidth.e7fig):
+    exact i.i.d. expectations, Monte Carlo with 95% intervals."""
+    c = pd.read_csv(RES / "e7_fig.csv")
+    d = c[(c.b == 3) & (c.eps == 0.1)]
+    for mode, mt in [("MONO", "mono"), ("FIV", "fiv"),
+                     ("FIV+FEC", "fec"), ("FIV+FEC-IL", "il")]:
+        g = d[d["mode"] == mode]
+        dat(f"chan_{mt}", g[["N", "exact", "mc_iid", "ci_iid", "mc_ge",
+                             "ci_ge"]])
+    o = pd.read_csv(RES / "e7_opt.csv")
+    o = o[(o.b == 3) & (o.eps == 0.1)].iloc[0]
+    const("chanNopt", o.N_relaxed)
+    const("chanNexact", int(o.N_exact), "{:d}")
+
+
+def perf_sweep():
+    """Integrated performability against N (exp_integrated.sweep)."""
+    d = pd.read_csv(RES / "e10_sweep.csv")
+    for ch in ["iid", "bursty"]:
+        for des, dt in [("MONO", "mono"), ("FIV+FEC-IL", "il")]:
+            for pol, R, pt in [("static", 0, "st"), ("aci", 0, "a0"),
+                               ("aci", 3, "a3")]:
+                x = d[(d.channel == ch) & (d.design == des)
+                      & (d.policy == pol) & (d.R == R)]
+                g = x.groupby("N").agg(
+                    gam=("gamma_fwd", "mean"), gsd=("gamma_fwd", "std"),
+                    haz=("haz_fwd", "mean"), hsd=("haz_fwd", "std"),
+                    mis=("miscov", "mean"), msd=("miscov", "std")
+                ).reset_index()
+                g.loc[g.gam <= 0, ["gam", "gsd"]] = np.nan
+                g.loc[g.haz <= 0, ["haz", "hsd"]] = np.nan
+                dat(f"perf_{ch}_{dt}_{pt}", g)
 
 
 def accountability():
@@ -128,7 +150,14 @@ def accountability():
         n = np.logspace(2, math.log10(20000), 80)
         dat(f"acc_{tag}_th", pd.DataFrame(dict(
             n=n, p=1 - (1 - q * g.beta_eff.iloc[0]) ** n)))
-        dat(f"acc_{tag}_mc", g[["n", "p_detect"]])
+        # 95% Wilson intervals for the 2000 simulated sessions per point
+        n_t, p = 2000, g.p_detect.to_numpy()
+        z = 1.96
+        c = (p + z * z / (2 * n_t)) / (1 + z * z / n_t)
+        h = z * np.sqrt(p * (1 - p) / n_t + z * z / (4 * n_t * n_t)) \
+            / (1 + z * z / n_t)
+        dat(f"acc_{tag}_mc", pd.DataFrame(dict(
+            n=g.n.to_numpy(), p_detect=p, ep=c + h - p, em=p - (c - h))))
 
 
 def tolerance():
@@ -136,13 +165,14 @@ def tolerance():
     tol = pd.read_csv(RES / "e9_tolerance.csv")
     for strat, st in [("answer", "ans"), ("withhold", "wh")]:
         for pol, pt in [("static", "static"), ("aci", "aci"),
-                        ("aci+revoke", "key")]:
+                        ("aci+key", "key")]:
             d = tr[(tr.strategy == strat) & (tr.policy == pol)]
             dat(f"tol_{st}_{pt}", d[["t", "miscov"]])
-        tk = tol[(tol.seed == 0) & (tol.aseed == 0) & (tol.q == 0.01)
-                 & (tol.alpha == 0.01) & (tol.strategy == strat)
-                 & (tol.policy == "aci+revoke")].t_revoke.iloc[0]
-        const(f"tolKey{st}", tk, "{:.0f}")
+        x = tol[(tol.seed == 0) & (tol.aseed == 0) & (tol.q == 0.01)
+                & (tol.alpha == 0.01) & (tol.strategy == strat)
+                & (tol.policy == "aci+key")].iloc[0]
+        te = x.t_effective
+        const(f"tolKey{st}", te if te == te else -1, "{:.0f}")
 
 
 if __name__ == "__main__":
@@ -152,6 +182,7 @@ if __name__ == "__main__":
     selective()
     bytes_()
     channel()
+    perf_sweep()
     accountability()
     tolerance()
     (OUT / "consts.tex").write_text("\n".join(CONSTS) + "\n")

@@ -55,6 +55,7 @@ HDR_FIXED = struct.calcsize(_HDR_FMT)          # 21 B
 HDR_BYTES = HDR_FIXED + HASH_LEN               # + R_evid = 53 B
 FRAG_HDR = 6                                   # seq(4) + offset(2)
 SALT_LEN = 16
+MAX_U32 = (1 << 32) - 1
 
 
 def H(b: bytes) -> bytes:
@@ -286,8 +287,22 @@ def parse_batch(data: bytes, sig_len: int | tuple[int, int]) -> Batch:
     claims = []
     for i in range(h.N):
         o = HDR_BYTES + i * cb
-        claims.append(Claim(data[o], data[o + 1], bytes(data[o + 2:o + cb])))
+        c = Claim(data[o], data[o + 1], bytes(data[o + 2:o + cb]))
+        if not claim_well_formed(c, h.mode, h.K):
+            raise ParseError("claim field out of range")
+        claims.append(c)
     return Batch(h, claims, bytes(data[body_end:]))
+
+
+def claim_well_formed(c: Claim, mode: int, K: int) -> bool:
+    """Range checks of G4: top-1 label below K and, in set mode, no mask
+    bit set beyond class K-1 (an empty mask is well formed; its set is
+    not a singleton, so the claim is escalated)."""
+    if c.z >= K or len(c.cert) != claim_bytes(mode, K) - 2:
+        return False
+    if mode == MODE_SET:
+        return int.from_bytes(c.cert, "big") >> K == 0
+    return True
 
 
 @dataclass
@@ -319,6 +334,9 @@ class Transmitter:
                t: int) -> Batch:
         N = len(claims)
         seq, cnt = self.seq, self.cnt
+        if seq >= MAX_U32 or cnt + N > MAX_U32:
+            raise OverflowError("sequence or claim counter exhausted: "
+                                "re-enroll under a new sender identifier")
         self.seq += 1
         self.cnt += N
         salts = [salt_for(self.k_salt, seq, i) for i in range(N)]
@@ -339,18 +357,74 @@ class Transmitter:
         return batch.evidence[i], batch.salts[i], audit_path(ev, i)
 
     def open_bytes(self, batch: Batch, i: int) -> bytes:
+        """Framed opening: slot id (sid, seq, i) echoing the challenge,
+        2-B evidence length, evidence, salt, and inclusion path."""
         x, s, path = self.open(batch, i)
-        return x + s + b"".join(path)
+        return (struct.pack(">HIHH", self.sid, batch.hdr.seq, i, len(x))
+                + x + s + b"".join(path))
+
+
+OPEN_HDR = 2 + 4 + 2 + 2                   # sid, seq, index, len(X)
 
 
 def audit_response_bytes(B_x: float, N: int) -> float:
-    """Upper bound on the opening size: evidence, 16-B salt, and at most
-    ceil(log2 N) path hashes (exact when N is a power of two)."""
+    """Upper bound on the framed opening size: 10-B frame header,
+    evidence, 16-B salt, and at most ceil(log2 N) path hashes (exact when
+    N is a power of two)."""
     depth = max(0, (N - 1).bit_length())
-    return B_x + SALT_LEN + HASH_LEN * depth
+    return OPEN_HDR + B_x + SALT_LEN + HASH_LEN * depth
 
 
-AUDIT_CHALLENGE_BYTES = 2 + 4 + 2          # sid, seq, index (reverse link)
+CHAL_TAG_LEN = 16
+AUDIT_CHALLENGE_BYTES = 2 + 4 + 2 + CHAL_TAG_LEN   # slot id + MAC tag
+
+
+def make_challenge(k_rs: bytes, sid: int, seq: int, i: int) -> bytes:
+    """Receiver-to-sender challenge authenticated with a pairwise key
+    established at enrollment, so that third parties cannot induce
+    openings."""
+    body = struct.pack(">HIH", sid, seq, i)
+    return body + hmac.new(k_rs, b"PCSP-v2-chal" + body,
+                           hashlib.sha256).digest()[:CHAL_TAG_LEN]
+
+
+def check_challenge(k_rs: bytes, chal: bytes):
+    """Return the slot (sid, seq, i) of an authentic challenge, or None."""
+    if len(chal) != AUDIT_CHALLENGE_BYTES:
+        return None
+    body = chal[:8]
+    tag = hmac.new(k_rs, b"PCSP-v2-chal" + body,
+                   hashlib.sha256).digest()[:CHAL_TAG_LEN]
+    if not hmac.compare_digest(tag, chal[8:]):
+        return None
+    return struct.unpack(">HIH", body)
+
+
+def parse_opening(data: bytes):
+    """Split a framed opening into (sid, seq, i, x, salt, path)."""
+    if len(data) < OPEN_HDR:
+        return None
+    sid, seq, i, lx = struct.unpack(">HIHH", data[:OPEN_HDR])
+    rest = data[OPEN_HDR:]
+    if len(rest) < lx + SALT_LEN or (len(rest) - lx - SALT_LEN) % HASH_LEN:
+        return None
+    x, salt = rest[:lx], rest[lx:lx + SALT_LEN]
+    pb = rest[lx + SALT_LEN:]
+    path = [pb[o:o + HASH_LEN] for o in range(0, len(pb), HASH_LEN)]
+    return sid, seq, i, bytes(x), bytes(salt), path
+
+
+def discrepant(reported: bytes, recomputed: bytes) -> bool:
+    """Score-mode falsification predicate: the signed 8-bit certificate
+    differs from the approved model's recomputed 8-bit output by more than
+    1 LSB in some class, or has a different (lowest-index) arg max."""
+    a = [int(v) for v in reported]
+    b = [int(v) for v in recomputed]
+    if len(a) != len(b):
+        return True
+    am = max(range(len(a)), key=lambda c: (a[c], -c))
+    bm = max(range(len(b)), key=lambda c: (b[c], -c))
+    return max(abs(u - v) for u, v in zip(a, b)) > 1 or am != bm
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +507,7 @@ class Receiver:
         p = self.policy
         h = batch.hdr
         if h.N != len(batch.claims) or any(
-                len(c.cert) != claim_bytes(h.mode, h.K) - 2
+                not claim_well_formed(c, h.mode, h.K)
                 for c in batch.claims):
             return False, G_STRUCT
         b = self.bundles.get(h.bundle)
@@ -537,16 +611,21 @@ def fiv_verify_header(rx: Receiver, hdr_stream: bytes, j: int, t_now: int):
         return False, h, None
     w.commit(h.seq)
     rx.n_emitted[h.sid] = max(rx.n_emitted.get(h.sid, 0), h.cnt + h.N)
-    rx.fiv_state[(h.sid, h.seq)] = dict(h=h, roots=roots, j=j, seen=set())
+    rx.fiv_state[(h.sid, h.seq)] = dict(h=h, roots=roots, j=j, k=None,
+                                        acc=0)
     return True, h, roots
 
 
 def fiv_accept_fragment(rx: Receiver, sid: int, frag: bytes, k: int,
                         t_now: int):
     """Accept the claims of one fragment of a registered FIV batch.  Rejects
-    fragments of unknown or expired batches (G3 freshness, state dropped
-    after tau epochs), fragments already accepted (per-batch offset set),
-    and fragments that fail G4 length or the subtree proof."""
+    fragments of unknown or expired batches (G3 freshness against the
+    signed emission epoch; state dropped after tau epochs), fragments of a
+    sender whose key was revoked or whose bundle was withdrawn after the
+    header was registered, fragments whose layout k differs from the
+    batch's first accepted fragment, fragments that overlap any claim slot
+    already accepted (per-batch bitmap), and fragments that fail G4 length,
+    range checks, or the subtree proof."""
     if len(frag) < FRAG_HDR:
         return None
     seq, off = struct.unpack(">IH", frag[:FRAG_HDR])
@@ -557,12 +636,24 @@ def fiv_accept_fragment(rx: Receiver, sid: int, frag: bytes, k: int,
     if abs(t_now - h.t) > rx.policy.tau:
         del rx.fiv_state[(sid, seq)]
         return None
-    if off in st["seen"]:
+    # a key action or a bundle withdrawal after registration also stops
+    # the claims of batches registered earlier
+    b = rx.bundles.get(h.bundle)
+    if (h.sid, h.kid) not in rx.keys or b is None or \
+            (b.mode, b.K, b.alpha_code) != (h.mode, h.K, h.alpha_code):
+        del rx.fiv_state[(sid, seq)]
+        return None
+    n = h.N.bit_length() - 1
+    if not 0 <= k <= n - st["j"] or (st["k"] is not None and k != st["k"]):
+        return None                               # layout pinned per batch
+    span = ((1 << (1 << k)) - 1) << off if off < h.N else 0
+    if span == 0 or st["acc"] & span:             # no claim slot twice
         return None
     claims = fiv_verify_fragment(h, st["roots"], frag, st["j"], k)
     if claims is None:
         return None
-    st["seen"].add(off)
+    st["k"] = k
+    st["acc"] |= span
     rx.n_accepted[sid] = rx.n_accepted.get(sid, 0) + len(claims)
     return claims
 
@@ -575,12 +666,14 @@ def fiv_verify_fragment(h: Header, roots, frag: bytes, j: int, k: int):
     cb = claim_bytes(h.mode, h.K)
     n = N.bit_length() - 1
     plen = HASH_LEN * (n - j - k)
-    if seq != h.seq or off % P or off >= N or \
+    if seq != h.seq or off % P or off >= N or j + k > n or \
             len(frag) != FRAG_HDR + P * cb + plen:
         return None
     body = frag[FRAG_HDR:FRAG_HDR + P * cb]
     claims = [Claim(body[i * cb], body[i * cb + 1],
                     bytes(body[i * cb + 2:(i + 1) * cb])) for i in range(P)]
+    if not all(claim_well_formed(c, h.mode, h.K) for c in claims):
+        return None
     proof = [frag[FRAG_HDR + P * cb + HASH_LEN * r:
                   FRAG_HDR + P * cb + HASH_LEN * (r + 1)]
              for r in range(n - j - k)]

@@ -91,7 +91,42 @@ def test_serialization_and_g4():
     assert rx.verify_bytes(data[:-1], 5)[1] == P.G_STRUCT     # short
     assert rx.verify_bytes(data + b"\0", 5)[1] == P.G_STRUCT  # long
     x, s, path = tx.open(b, 2)
-    assert len(tx.open_bytes(b, 2)) == P.audit_response_bytes(len(x), 8)
+    ob = tx.open_bytes(b, 2)
+    assert len(ob) == P.audit_response_bytes(len(x), 8)
+    sid, seq, i, x2, s2, p2 = P.parse_opening(ob)
+    assert (sid, seq, i) == (1, b.hdr.seq, 2) and rx.check_audit(b, i, x2, s2, p2)
+    # out-of-range fields are rejected by G4
+    d = bytearray(data); d[P.HDR_BYTES] = 5                    # z >= K
+    assert rx.verify_bytes(bytes(d), 5)[1] == P.G_STRUCT
+    d = bytearray(data); d[P.HDR_BYTES + 2] = 0x80             # padding bit
+    assert rx.verify_bytes(bytes(d), 5)[1] == P.G_STRUCT
+
+
+def test_challenge_authentication():
+    k = b"r" * 32
+    c = P.make_challenge(k, 1, 7, 3)
+    assert len(c) == P.AUDIT_CHALLENGE_BYTES
+    assert P.check_challenge(k, c) == (1, 7, 3)
+    assert P.check_challenge(b"x" * 32, c) is None
+    assert P.check_challenge(k, c[:-1] + bytes([c[-1] ^ 1])) is None
+
+
+def test_discrepancy_predicate():
+    wrong_but_honest = bytes([255, 0])           # model itself says benign
+    assert not P.discrepant(wrong_but_honest, bytes([255, 0]))
+    assert P.discrepant(bytes([128, 127]), bytes([127, 128]))   # arg max flips
+    assert P.discrepant(bytes([255, 0]), bytes([3, 252]))      # overwrite
+    assert not P.discrepant(bytes([200, 55]), bytes([201, 54]))  # 1 LSB
+
+
+def test_counter_overflow():
+    sig, tx, rx, cl, ev = _setup()
+    tx.cnt = P.MAX_U32 - 4
+    try:
+        tx.encode(cl, ev, t=1)
+        assert False
+    except OverflowError:
+        pass
 
 
 def test_fiv():
@@ -116,6 +151,21 @@ def test_fiv():
             assert P.fiv_accept_fragment(rx2, 1, frags[1], k, 5) is None
         assert not P.fiv_verify_header(rx2, hs, j, 5)[0]               # replay
         assert not P.fiv_verify_header(rx2, hs[:-1], j, 5)[0]          # G4
+
+
+def test_fiv_overlap_and_revocation():
+    sig, tx, rx, cl, ev = _setup(N=4)
+    b = tx.encode(cl, ev, t=5)
+    hs, f2 = P.fiv_encode(b, 0, 1)          # fragments of 2 claims
+    _, f1 = P.fiv_encode(b, 0, 0)           # fragments of 1 claim
+    rx2 = P.Receiver(sig, dict(rx.keys), rx.bundles)
+    assert P.fiv_verify_header(rx2, hs, 0, 5)[0]
+    assert P.fiv_accept_fragment(rx2, 1, f2[0], 1, 5) is not None  # claims 0,1
+    assert P.fiv_accept_fragment(rx2, 1, f1[1], 0, 5) is None      # claim 1 again
+    assert P.fiv_accept_fragment(rx2, 1, f1[2], 0, 5) is None      # other layout
+    rx2.keys.pop((1, 0))                                           # revoke
+    assert P.fiv_accept_fragment(rx2, 1, f2[1], 1, 5) is None
+    assert P.fiv_accept_fragment(rx2, 1, f2[1], 7, 5) is None      # bad k
 
 
 if __name__ == "__main__":

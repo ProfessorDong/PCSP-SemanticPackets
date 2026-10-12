@@ -41,6 +41,22 @@ class FixedSizeStub(StubBackend):
 
 # ------------------------------------------------------------------ E6
 
+def zlib_batch(records):
+    """Compress a batch of variable-length evidence records with an
+    unambiguous framing (2-B length prefix per record) and check the
+    round trip, so that the baseline is decodable record by record."""
+    framed = b"".join(len(r).to_bytes(2, "big") + r for r in records)
+    c = zlib.compress(framed, 9)
+    d = zlib.decompress(c)
+    out, i = [], 0
+    while i < len(d):
+        n = int.from_bytes(d[i:i + 2], "big")
+        out.append(d[i + 2:i + 2 + n])
+        i += 2 + n
+    assert out == list(records)
+    return c
+
+
 def e6():
     rows, base = [], []
     for name in ["nsl_iid", "cic_iid"]:
@@ -80,8 +96,7 @@ def e6():
         for N in [32, 128, 512]:
             comp = []
             for j in range(0, min(len(ev) - N + 1, 64 * N), N):   # full batches only
-                chunk = b"".join(ev[j:j + N])
-                comp.append(len(zlib.compress(chunk, 9)) / N)
+                comp.append(len(zlib_batch(ev[j:j + N])) / N)
             base.append(dict(scenario=name, N=N,
                              raw_mean=float(rb.mean()),
                              raw_median=float(np.median(rb)),
@@ -96,7 +111,7 @@ def e6():
     Bo = P.batch_overhead(SIG_BYTES["ML-DSA-65"])
     grid = []
     for N in list(range(128, 513, 16)):
-        z = float(np.mean([len(zlib.compress(b"".join(ev[j:j + N]), 9)) / N
+        z = float(np.mean([len(zlib_batch(ev[j:j + N])) / N
                            for j in range(0, 64 * N, N) if j + N <= len(ev)]))
         for q in (0.0, 0.01):
             pc = P.per_claim_bytes(N, P.MODE_SET, 5, SIG_BYTES["ML-DSA-65"],
@@ -302,7 +317,111 @@ def e7():
     pd.DataFrame(nopt).to_csv(RES / "e7_nopt.csv", index=False)
 
 
+
+# ------------------------------------------------------------------ E7b
+# Figure data for the TDSC manuscript: exact i.i.d. expectations, Monte
+# Carlo with 95% intervals (2000 batches per point), and the burst-aware
+# parity chosen on separate tuning draws.
+
+from numba import njit
+
+
+@njit(cache=True)
+def _ge_matrix(trials, n, eps, burst, u):
+    p_bg = 1.0 / burst
+    p_gb = eps * p_bg / (1.0 - eps)
+    out = np.empty((trials, n), np.bool_)
+    for t in range(trials):
+        bad = u[t, 0] < eps
+        for i in range(n):
+            out[t, i] = bad
+            bad = (u[t, i + 1] >= p_bg) if bad else (u[t, i + 1] < p_gb)
+    return out
+
+
+def mc_matrix(N, b, B_o, M, eps, mode, r, rng, trials, bursty, interleave):
+    Fh, Fc, Pk, _ = layout(N, b, B_o, M, "MONO" if mode == "MONO" else "FIV")
+    if mode == "MONO":
+        frames = Fh
+    else:
+        nh = Fh + (r if mode.startswith("FIV+FEC") else 0)
+        frames = nh + Fc
+    u = rng.random((trials, frames + 1))
+    lost = _ge_matrix(trials, frames, eps, BURST_GE, u) if bursty \
+        else u[:, :frames] < eps
+    if mode == "MONO":
+        got = N * (~lost.any(1))
+        return got, np.ones(trials, bool) & ~lost.any(1), frames
+    if interleave:
+        hpos = np.unique(np.round(np.linspace(0, frames - 1, nh)).astype(int))
+    else:
+        hpos = np.arange(nh)
+    hm = np.zeros(frames, bool)
+    hm[hpos] = True
+    hrecv = (~lost[:, hm]).sum(1)
+    hok = hrecv >= Fh if mode.startswith("FIV+FEC") else hrecv == nh
+    got = np.where(hok, Pk * (~lost[:, ~hm]).sum(1), 0)
+    return got, hok, frames
+
+
+BURST_GE = 8
+
+
+def e7fig(trials=2000):
+    rng_t = np.random.default_rng(71)      # tuning draws
+    rng_e = np.random.default_rng(72)      # evaluation draws
+    B_o = P.batch_overhead(SIG_BYTES["ML-DSA-65"])
+    M = 200
+    rows = []
+    for b in (3, 4):
+        for eps in (0.05, 0.1):
+            for N in [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]:
+                Fh = layout(N, b, B_o, M, "FIV")[0]
+                r_iid = 0
+                while expected_verified(N, b, B_o, M, eps, "FIV+FEC",
+                                        r_iid)[0] / (N * (1 - eps)) < 0.99:
+                    r_iid += 1
+                r_il = 0
+                while r_il < 6 * Fh:
+                    _, hok, _ = mc_matrix(N, b, B_o, M, eps, "FIV+FEC-IL",
+                                          r_il, rng_t, trials, True, True)
+                    if hok.mean() >= 0.99:
+                        break
+                    r_il += 1
+                for mode, r, il in [("MONO", 0, False), ("FIV", 0, False),
+                                    ("FIV+FEC", r_iid, False),
+                                    ("FIV+FEC-IL", r_il, True)]:
+                    row = dict(b=b, eps=eps, N=N, mode=mode, r=r)
+                    if mode != "FIV+FEC-IL":
+                        ev, fr = expected_verified(
+                            N, b, B_o, M, eps,
+                            "FIV+FEC" if mode == "FIV+FEC" else mode, r)
+                        row["exact"] = ev / (fr * (M + FRAME_HDR)) * 1000
+                    for bursty in (False, True):
+                        got, _, fr = mc_matrix(N, b, B_o, M, eps, mode, r,
+                                               rng_e, trials, bursty, il)
+                        kb = fr * (M + FRAME_HDR) / 1000
+                        tag = "ge" if bursty else "iid"
+                        row[f"mc_{tag}"] = got.mean() / kb
+                        row[f"ci_{tag}"] = 1.96 * got.std(ddof=1) / \
+                            np.sqrt(trials) / kb
+                    rows.append(row)
+        print("e7fig b", b, flush=True)
+    pd.DataFrame(rows).to_csv(RES / "e7_fig.csv", index=False)
+    # exact integer MONO optimum (full 208-B frames on air), both modes
+    opt = []
+    for b in (3, 4):
+        for eps in (0.05, 0.1):
+            Ns = np.arange(1, 20001)
+            F = np.ceil((Ns * b + B_o) / M)
+            eff = Ns * (1 - eps) ** F / (F * (M + FRAME_HDR)) * 1000
+            opt.append(dict(b=b, eps=eps, N_relaxed=n_opt_mono(b, B_o, M, eps),
+                            N_exact=int(Ns[eff.argmax()]),
+                            eff_exact=float(eff.max())))
+    pd.DataFrame(opt).to_csv(RES / "e7_opt.csv", index=False)
+
+
 if __name__ == "__main__":
     import sys
-    for p in sys.argv[1:] or ["e6", "e7"]:
+    for p in sys.argv[1:] or ["e6", "e7", "e7fig"]:
         globals()[p]()

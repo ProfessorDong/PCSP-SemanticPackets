@@ -66,5 +66,36 @@ def main():
     pd.DataFrame(rows).to_csv(RES / "e8_latency.csv", index=False)
 
 
+
+
+def recompute():
+    """Audit recomputation cost: CPU inference of the approved XGBoost
+    model on one opened 78-feature flow (and per flow in a 1024 batch),
+    pinned to one core.  Output: results/e8_recompute.csv"""
+    import xgboost as xgb
+    from common import scenario
+    os.sched_setaffinity(0, {2})
+    s = scenario("cic_zd", 0)
+    cpu = xgb.XGBClassifier()
+    cpu.load_model(bytearray(s["clf"].get_booster().save_raw("json")))
+    cpu.set_params(device="cpu", n_jobs=1)
+    X = s["X"][:1024]
+    rows = []
+    for n in (1, 1024):
+        ts = []
+        for r in range(201):
+            t0 = time.perf_counter()
+            cpu.predict_proba(X[:n])
+            ts.append(time.perf_counter() - t0)
+        ts = np.array(ts[1:])
+        rows.append(dict(n=n, median_ms=1e3 * np.median(ts),
+                         p99_ms=1e3 * np.percentile(ts, 99),
+                         per_flow_us=1e6 * np.median(ts) / n))
+        print(rows[-1], flush=True)
+    pd.DataFrame(rows).to_csv(RES / "e8_recompute.csv", index=False)
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    for p in sys.argv[1:] or ["main", "recompute"]:
+        globals()[p]()
