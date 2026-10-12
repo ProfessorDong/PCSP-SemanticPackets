@@ -125,7 +125,8 @@ def tolerance():
                 key = "--"
             row = [(r"\multirow{3}{*}{" + sl + "}") if i == 0 else "", pl,
                    MT.pm(x.miscov.mean(), x.miscov.std(), 4),
-                   f"{x.mean_size.mean():.2f}",
+                   f"{x.singleton.mean():.2f}",
+                   f"{(x.wrong_act / x.singleton).mean():.3f}",
                    f"{x.fals_acc.mean():,.0f}",
                    f"{x.fals_acted.mean():,.0f}", key]
             lines.append(" & ".join(row) + r" \\")
@@ -157,10 +158,21 @@ def tolerance():
     n = d[(d.strategy == "none") & (d.q == 0.01) & (d.policy == "aci")]
     num("tolNoneACI", n.miscov.mean())
     num("tolNoneSize", n.mean_size.mean(), "{:.2f}")
+    num("tolNoneAuto", 100 * n.singleton.mean(), "{:.0f}")
+    for strat, t in [("answer", "Ans"), ("withhold", "Wh")]:
+        x = d[(d.strategy == strat) & (d.q == 0.01) & (d.policy == "aci")]
+        num(f"tolAuto{t}", 100 * x.singleton.mean(), "{:.0f}")
+        num(f"tolWrong{t}", 100 * x.wrong_act.mean(), "{:.1f}")
+        num(f"tolSel{t}", 100 * (x.wrong_act / x.singleton).mean(), "{:.1f}")
+    k = d[(d.strategy == "answer") & (d.q == 0.01) & (d.policy == "aci+key")]
+    num("tolAutoKey", 100 * k.singleton.mean(), "{:.0f}")
 
 
 def performability():
+    import numpy as np
     d = pd.read_csv(RES / "e10_integrated.csv")
+    d = d[d.repair == "selective"].assign(
+        feasible=lambda x: x.feasible.astype(str) == "True")
     rec = [("static", 0, "static"), ("aci", 0, "ACI, no repair"),
            ("aci", 3, "ACI, $R=3$")]
     lines = []
@@ -171,8 +183,10 @@ def performability():
                 x = d[(d.channel == ch) & (d.design == des) & (d.policy == pol)
                       & (d.R == R)]
                 kb = x.fwd_bytes / 1000
+                feas = "" if x.feasible.iloc[0] else r"$^\dagger$"
                 row = [(r"\multirow{6}{*}{" + cl + "}") if first else "",
-                       des if i == 0 else "", rl, f"{int(x.N.iloc[0])}",
+                       des if i == 0 else "", rl,
+                       f"{int(x.N.iloc[0])}{feas}",
                        f"{(x.accepted / kb).mean():.1f}",
                        f"{x.gamma_fwd.mean():.1f}",
                        f"{x.haz_fwd.mean():.2f}",
@@ -184,8 +198,10 @@ def performability():
                 lines.append(" & ".join(row) + r" \\")
         lines.append(r"\midrule")
     (OUT / "tab_perf.tex").write_text("\n".join(lines[:-1]) + "\n")
-    g = lambda ch, des, pol, R, c: d[(d.channel == ch) & (d.design == des)
-                                     & (d.policy == pol) & (d.R == R)][c].mean()
+    sel = lambda ch, des, pol, R: d[(d.channel == ch) & (d.design == des)
+                                    & (d.policy == pol) & (d.R == R)]
+    g = lambda ch, des, pol, R, c: sel(ch, des, pol, R)[c].mean()
+    rng = np.random.default_rng(0)
     for ch, t in [("bursty", "B"), ("iid", "I")]:
         des = "FIV+FEC-IL"
         gs, hs = g(ch, des, "static", 0, "gamma_fwd"), g(ch, des, "static", 0, "haz_fwd")
@@ -196,10 +212,58 @@ def performability():
         num(f"perfHa{t}", ha, "{:.2f}")
         num(f"perfGratio{t}", gs / ga, "{:.1f}")
         num(f"perfHratio{t}", hs / ha, "{:.0f}")
+        # cluster bootstrap over model seeds (each with its five channel
+        # runs) for the ratios of means
+        S = sel(ch, des, "static", 0).set_index(["seed", "cseed"])
+        A_ = sel(ch, des, "aci", 3).set_index(["seed", "cseed"])
+        seeds = np.array(sorted(S.index.get_level_values(0).unique()))
+        rg, rh = [], []
+        for _ in range(10000):
+            bs = rng.choice(seeds, len(seeds))
+            s_ = pd.concat([S.loc[b] for b in bs])
+            a_ = pd.concat([A_.loc[b] for b in bs])
+            rg.append(s_.gamma_fwd.mean() / a_.gamma_fwd.mean())
+            rh.append(s_.haz_fwd.mean() / a_.haz_fwd.mean())
+        num(f"perfGratioLo{t}", np.percentile(rg, 2.5), "{:.1f}")
+        num(f"perfGratioHi{t}", np.percentile(rg, 97.5), "{:.1f}")
+        num(f"perfHratioLo{t}", np.percentile(rh, 2.5), "{:.0f}")
+        num(f"perfHratioHi{t}", np.percentile(rh, 97.5), "{:.0f}")
         num(f"perfGnr{t}", g(ch, des, "aci", 0, "gamma_fwd"), "{:.1f}")
-        x = d[(d.channel == ch) & (d.design == des) & (d.policy == "aci")
-              & (d.R == 0)]
+        x = sel(ch, des, "aci", 0)
         num(f"perfLost{t}", 100 * x.open_lost.sum() / x.audits.sum(), "{:.0f}")
+        num(f"perfQuarNR{t}", int((x.quar_at >= 0).sum()), "{:d}")
+        y = sel(ch, des, "aci", 3)
+        num(f"perfLostR{t}", 100 * y.open_lost.sum() / y.audits.sum(), "{:.1f}")
+        num(f"perfQuarR{t}", int((y.quar_at >= 0).sum()), "{:d}")
+        num(f"perfAbove{t}", int((y.miscov > 0.01).sum()), "{:d}")
+        num(f"perfMis{t}", y.miscov.mean(), "{:.4f}")
+        num(f"perfEsc{t}", 10 * (y.escal / y.accepted).mean(), "{:.1f}")
+        num(f"perfMisMax{t}", y.miscov.max(), "{:.3f}")
+        num(f"perfAccMin{t}", y.accepted.min() / 1000, "{:.0f}")
+        num(f"perfBiLoss{t}", 100 * (1 - (y.gamma_bi / y.gamma_fwd).mean()),
+            "{:.1f}")
+        num(f"perfN{t}", int(y.N.iloc[0]), "{:d}")
+    w = pd.read_csv(RES / "e10_integrated.csv")
+    w = w[(w.repair == "whole")]
+    for ch, t in [("bursty", "B"), ("iid", "I")]:
+        x = w[(w.channel == ch) & (w.design == "FIV+FEC-IL")]
+        num(f"perfWholeLost{t}", 100 * x.open_lost.sum() / x.audits.sum(), "{:.1f}")
+        num(f"perfWholeG{t}", x.gamma_fwd.mean(), "{:.1f}")
+        num(f"perfWholeN{t}", int(x.N.iloc[0]), "{:d}")
+    sl = pd.read_csv(RES / "e10_selected.csv")
+    m = sl[(sl.channel == "iid") & (sl.design == "MONO") & (sl.policy == "aci")
+           & (sl.R == 3) & (sl.repair == "selective")].iloc[0]
+    num("perfMonoMisVal", m.mis_mean, "{:.3f}")
+    x = d[(d.channel == "iid") & (d.design == "MONO") & (d.policy == "aci")
+          & (d.R == 3)]
+    num("perfMonoMis", x.miscov.mean(), "{:.3f}")
+    num("perfMonoAcc", x.accepted.mean() / 1000, "{:.0f}")
+    # masking labeler (exp_risk.masking)
+    mk = pd.read_csv(RES / "e3d_masking.csv").groupby("budget").mean(
+        numeric_only=True)
+    num("maskEta", mk.loc[0.5, "eta"], "{:.4f}")
+    num("maskMis", mk.loc[0.5, "miscov"], "{:.4f}")
+    num("maskBound", mk.loc[0.5, "bound"], "{:.4f}")
 
 
 def bandwidth():
@@ -238,6 +302,12 @@ def bandwidth():
     num("geIL", il.mc_ge.max(), "{:.1f}")
     num("geILr", int(il.loc[il.mc_ge.idxmax(), "r"]), "{:d}")
     num("geFEC", fec.mc_ge.max(), "{:.1f}")
+    ff = pd.read_csv(RES / "e7_fig.csv")
+    ff = ff[ff["mode"] != "FIV+FEC-IL"]
+    out = (ff.exact < ff.lo_iid) | (ff.exact > ff.hi_iid)
+    num("chanOut", int(out.sum()), "{:d}")
+    num("chanPts", len(ff), "{:d}")
+    num("chanOutMono", int((out & (ff["mode"] == "MONO")).sum()), "{:d}")
     rc = pd.read_csv(RES / "e8_recompute.csv")
     num("recompUs", rc[rc.n == 1].median_ms.iloc[0] * 1000, "{:.0f}")
     ev = pd.read_csv(RES / "e3b_evasion.csv")

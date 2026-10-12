@@ -23,7 +23,13 @@ Labeling service (cic_zd, alpha = 0.01, q = 0.01): the audited label is
 flipped independently with probability eta, or is the approved model's own
 top-1 output (a labeler that repeats the model's errors).
 
-Output: results/e3d_risk.csv, results/e3d_labels.csv
+Masking labeler (masking(), same streams and audits): for a fraction b of
+the attack claims the labeling service returns the model's top-1 output
+instead of the true label, so that an audited miscovered attack claim is
+reported as covered; the realized masking rate eta_T of Theorem 3 and the
+expectation bound with that term are recorded.
+
+Output: results/e3d_risk.csv, results/e3d_labels.csv, results/e3d_masking.csv
 """
 
 from __future__ import annotations
@@ -137,6 +143,38 @@ def e3d(seeds=range(5), aseeds=range(5)):
     pd.DataFrame(lab).to_csv(RES / "e3d_labels.csv", index=False)
 
 
+def masking(seeds=range(5), aseeds=range(5), a=0.01, q=0.01):
+    rows = []
+    s0 = None
+    for seed in seeds:
+        s = scenario("cic_zd", seed)
+        y, K = s["y"], s["K"]
+        T = len(y)
+        Pca8, P8 = q8(s["Pca"]), q8(s["P"])
+        top = P8.argmax(1)
+        S = 1 - P8
+        S_ca = (1 - Pca8)[np.arange(len(s["yca"])), s["yca"]]
+        for ase in aseeds:
+            rng = np.random.default_rng(1000 * seed + ase)
+            A = rng.random(T) < q                     # the audits of e3d
+            um = np.random.default_rng(5000 + 1000 * seed + ase).random(T)
+            res = np.arange(T) + 100
+            fb = np.zeros(T, np.int8)
+            for b in [0.0, 0.1, 0.25, 0.5, 1.0]:
+                yf = np.where((y != 0) & (um < b), top, y)
+                err, size, _, D = C.aci_sched(S, y, S_ca, a, 0.01, A, res, fb,
+                                              y_fb=yf)
+                # label error that masks a miscoverage: Y not in C, Y~ in C
+                # (binary sets: C = {top} whenever Y is missed)
+                eta = float((err & (yf == top)).mean())
+                bound = a + (a / 0.01 + 2 * D * (1 - a)) / (q * T) + eta
+                rows.append(dict(seed=seed, aseed=ase, budget=b, eta=eta,
+                                 bound=bound, D=D,
+                                 **metrics(err, size, y, top, K)))
+        print("masking", seed, flush=True)
+    pd.DataFrame(rows).to_csv(RES / "e3d_masking.csv", index=False)
+
+
 def traces(seed=0, ase=0, a=0.01):
     """Cumulative and trailing-window miscoverage (seed 0, audit seed 0),
     static vs ACI with q in {0.01, 0.05}; window 2000 (CIC) or 1000
@@ -169,5 +207,5 @@ def traces(seed=0, ase=0, a=0.01):
 
 if __name__ == "__main__":
     import sys
-    for p in sys.argv[1:] or ["e3d", "traces"]:
+    for p in sys.argv[1:] or ["e3d", "traces", "masking"]:
         globals()[p]()

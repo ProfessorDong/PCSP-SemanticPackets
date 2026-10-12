@@ -2,7 +2,10 @@
 E10  Integrated decision-level performability (Definition 2), simulated
 causally on one timeline instead of composed from separate experiments.
 
-Stream: day-ordered zero-day CIC-IDS-2017 (binary), one sender, alpha = 0.01.
+Stream: day-ordered zero-day CIC-IDS-2017 (binary), one sender, alpha = 0.01;
+        every design and batch size evaluates the same first T0 = 196,608
+        claims (divisible by every N in the grid), so that all compared
+        configurations see identical observations.
 Link:   ML-DSA-65, mu = 200-B frame payload plus 8-B framing, frame erasures
         i.i.d. (eps = 0.1) or Gilbert-Elliott (stationary 0.1, mean burst 8
         frames); the channel state runs continuously through batch frames,
@@ -13,23 +16,39 @@ Per batch:
   1. the batch's frames are sent (MONO, FIV+FEC, or FIV+FEC-IL layout for
      the actual claim size); the receiver accepts what verifies;
   2. the receiver draws an audit coin for every accepted claim and sends an
-     authenticated 24-B challenge (reverse link, i.i.d. loss eps);
-  3. the sender returns each opening (10-B frame header, 312-B evidence,
-     16-B salt, log2 N path hashes) in ceil(a/mu) frames; lost frames (and
-     lost challenges) are repeated for up to R further rounds (selective
-     repeat) after a retransmission timer of BACKOFF frame times, during
-     which the channel carries other traffic; an opening still missing
-     after the last round times out;
+     authenticated 26-B challenge (pcsp2.make_challenge: slot, round,
+     missing-fragment bitmap, MAC) on the reverse link (i.i.d. loss eps);
+  3. the sender answers from its cached opening (pcsp2.OpeningServer) with
+     the requested fragments, each a 9-B fragment header plus at most
+     mu - 9 bytes of the framed opening (10-B header, 312-B evidence, 16-B
+     salt, log2 N path hashes); after a retransmission timer of BACKOFF
+     frame times, during which the channel carries other traffic, the
+     receiver sends the next round with the bitmap of the fragments still
+     missing (selective repeat), for at most R repair rounds after the
+     first (R + 1 rounds in total); repair="whole" instead requests the
+     whole opening in every round; an opening still incomplete after the
+     last round times out;
   4. labels and timeouts of the batch's audits resolve DELAY accepted
      claims after the batch's last accepted claim (FIFO), so claims acted
      on early in a batch wait for the whole batch.
-Batch size N (and parity r) are tuned on separate draws (model seed 0,
-channel seed 1000) for each design and receiver: the N with the most
-correct decisions per kB among those whose tuning miscoverage meets alpha
-(the largest-Gamma N if none does).  Evaluation uses five model seeds x
-five fresh channel seeds.
+The timeouts of the (honest) sender are also fed to the anytime KL
+quarantine test (eps_bar = 0.02, delta = 1e-3) to measure its false
+quarantines on each channel.
+Operating point: N (and the parity r) is selected per design and receiver
+on three validation traces (model and stream seeds 5, 6, 7, each with its
+own channel seed), disjoint from the evaluation seeds: an ACI candidate is
+feasible iff its mean miscoverage over the validation traces is at most
+alpha and at least MIN_AUDITS audits completed on every trace; among
+feasible candidates the one with the largest mean Gamma is chosen.  (On a
+single trace the miscoverage of ACI fluctuates by about +-0.003 around
+alpha, so requiring every trace to meet alpha selects among N <= 1024
+almost at random; the largest validation miscoverage is reported.)  If none is feasible, the
+largest-Gamma candidate is evaluated and marked infeasible.  The static
+receiver takes the largest-Gamma N.  Evaluation: five model seeds x five
+fresh channel seeds.
 
-Output: results/e10_integrated.csv, results/e10_tuning.csv
+Output: results/e10_integrated.csv, results/e10_tuning.csv,
+        results/e10_sweep.csv
 """
 
 from __future__ import annotations
@@ -55,8 +74,12 @@ DELAY = 100
 B_X = 312
 B_O = P.batch_overhead(SIG_BYTES["ML-DSA-65"])
 NGRID = [64, 128, 256, 512, 1024, 2048, 4096]
+T0 = 196_608                 # common horizon, divisible by every N in NGRID
 FRAME = MU + FRAME_HDR
 BACKOFF = 2 * BURST
+VSEEDS = (5, 6, 7)           # validation model/stream seeds (not evaluated)
+MIN_AUDITS = 100             # completed audits required per validation trace
+EPS_BAR, DELTA_Q = 0.02, 1e-3
 
 
 @njit(cache=True)
@@ -134,10 +157,24 @@ def batch_frames(N, b, design, r):
     return nf, hm, Fh, Pk
 
 
-def run(s, design, N, r, policy, R, bursty, cseed, impute="level"):
-    y = s["y"]
-    T = len(y) - len(y) % N
-    y = y[:T]
+def quarantine_index(timeout):
+    """First resolved audit at which the anytime KL test of Section IV
+    rejects 'timeouts independent with rate <= EPS_BAR', or -1."""
+    if len(timeout) == 0:
+        return -1
+    n = np.arange(1, len(timeout) + 1)
+    ph = np.cumsum(timeout) / n
+    p = np.clip(ph, 1e-12, 1 - 1e-12)
+    kl = p * np.log(p / EPS_BAR) + (1 - p) * np.log((1 - p) / (1 - EPS_BAR))
+    stat = np.where(ph > EPS_BAR, n * kl, 0.0)
+    h = np.where(stat > np.log(n * (n + 1) / DELTA_Q))[0]
+    return int(h[0]) if len(h) else -1
+
+
+def run(s, design, N, r, policy, R, bursty, cseed, impute="level",
+        repair="selective"):
+    y = s["y"][:T0]
+    T = T0
     Q = C.quantize(s["P"][:T])
     Qca = C.quantize(s["Pca"])
     Sca = 1 - C.dequantize(Qca)[np.arange(len(s["yca"])), s["yca"]]
@@ -149,7 +186,7 @@ def run(s, design, N, r, policy, R, bursty, cseed, impute="level"):
     link = Link(rng, bursty)
     nf, hm, Fh, Pk = batch_frames(N, b, design, r)
     a_len = P.OPEN_HDR + B_X + P.SALT_LEN + P.HASH_LEN * int(math.log2(N))
-    fo = math.ceil(a_len / MU)
+    fo = P.n_opening_fragments(a_len, MU)
     fwd = rev = 0
     acc_idx, audit, res_time, fb = [], [], [], []
     n_acc = 0
@@ -175,8 +212,8 @@ def run(s, design, N, r, policy, R, bursty, cseed, impute="level"):
         na = int(A.sum())
         ok = np.zeros(na, bool)
         for u in range(na):
-            # challenge (reverse link, i.i.d.) and opening (forward link)
-            # with up to R repetitions of whatever is missing
+            # round 0 requests the opening; each later round re-requests
+            # the fragments still missing (selective) or all (whole)
             need = np.ones(fo, bool)
             done = False
             for rnd in range(R + 1):
@@ -185,11 +222,16 @@ def run(s, design, N, r, policy, R, bursty, cseed, impute="level"):
                 rev += P.AUDIT_CHALLENGE_BYTES + FRAME_HDR
                 if rng.random() < EPS:
                     continue                    # challenge lost
+                if repair == "whole":
+                    need[:] = True
                 k = int(need.sum())
                 l = link.send(k)
                 fwd += k * FRAME
                 idx = np.where(need)[0]
                 need[idx[~l]] = False
+                if repair == "whole" and l.any():
+                    need[:] = True              # incomplete copy discarded
+                    continue
                 if not need.any():
                     done = True
                     break
@@ -222,9 +264,13 @@ def run(s, design, N, r, policy, R, bursty, cseed, impute="level"):
     sing = size == 1
     correct = int((sing & ~err).sum())
     wrong = int((sing & err).sum())
+    tmo = (fbv[A] != C.FB_LABEL) if aci else np.zeros(0, bool)
     return dict(design=design, N=N, r=r, policy=policy, R=R, impute=impute,
-                channel="bursty" if bursty else "iid", T_emit=T,
+                repair=repair, channel="bursty" if bursty else "iid",
+                T_emit=T, fo=fo,
                 accepted=len(k), audits=opens, open_lost=lost_open,
+                completed=opens - lost_open,
+                quar_at=quarantine_index(tmo),
                 correct=correct, wrong=wrong, escal=int((~sing).sum()),
                 miscov=float(err.mean()) if len(k) else np.nan,
                 sel_err=wrong / max(1, int(sing.sum())), D=D,
@@ -234,45 +280,68 @@ def run(s, design, N, r, policy, R, bursty, cseed, impute="level"):
                 haz_bi=wrong / (fwd + rev) * 1000)
 
 
-CONFIGS = [  # (policy, R, impute)
-    ("static", 0, "level"),
-    ("aci", 0, "level"),
-    ("aci", 3, "level"),
+CONFIGS = [  # (policy, R, impute, repair)
+    ("static", 0, "level", "selective"),
+    ("aci", 0, "level", "selective"),
+    ("aci", 3, "level", "selective"),
+    ("aci", 3, "level", "whole"),
 ]
 DESIGNS = ["MONO", "FIV+FEC", "FIV+FEC-IL"]
 
 
 def tune():
-    s = scenario("cic_zd", 0)
+    """Every candidate N on the three validation traces."""
     rows = []
     prng = np.random.default_rng(4242)
-    for bursty in [False, True]:
-        for design in DESIGNS:
-            for pol, R, imp in CONFIGS:
-                b = 4 if pol == "aci" else 3
-                for N in NGRID:
-                    r = header_parity(N, b, design, prng)
-                    row = run(s, design, N, r, pol, R, bursty, 1000, imp)
-                    rows.append(row)
-            print("tuned", design, bursty, flush=True)
+    par = {}
+    for v in VSEEDS:
+        s = scenario("cic_zd", v)
+        for bursty in [False, True]:
+            for design in DESIGNS:
+                for pol, R, imp, rep in CONFIGS:
+                    b = 4 if pol == "aci" else 3
+                    for N in NGRID:
+                        if (N, b, design) not in par:
+                            par[(N, b, design)] = header_parity(N, b, design,
+                                                                prng)
+                        row = run(s, design, N, par[(N, b, design)], pol, R,
+                                  bursty, 1000 + v, imp, rep)
+                        row.update(vseed=v)
+                        rows.append(row)
+            print("tuned seed", v, bursty, flush=True)
     t = pd.DataFrame(rows)
     t.to_csv(RES / "e10_tuning.csv", index=False)
     return t
 
 
+KEY = ["channel", "design", "policy", "R", "impute", "repair"]
+
+
+def select(t):
+    """Locked operating point per configuration (see module docstring)."""
+    g = t.groupby(KEY + ["N", "r"]).agg(
+        gamma=("gamma_fwd", "mean"), mis_max=("miscov", "max"),
+        mis_mean=("miscov", "mean"), comp_min=("completed", "min"),
+        acc_min=("accepted", "min")).reset_index()
+    g["feasible"] = (g.policy == "static") | (
+        (g.mis_mean <= ALPHA) & (g.comp_min >= MIN_AUDITS))
+    best = (g.sort_values(["feasible", "gamma"], ascending=False)
+            .groupby(KEY).head(1))
+    return best
+
+
 def evaluate(t, seeds=range(5), cseeds=range(5)):
-    key = ["channel", "design", "policy", "R", "impute"]
-    t = t.assign(ok=(t.miscov <= ALPHA) | (t.policy == "static"))
-    best = (t.sort_values(["ok", "gamma_fwd"], ascending=False)
-            .groupby(key).head(1))
+    best = select(t)
+    best.to_csv(RES / "e10_selected.csv", index=False)
     rows = []
     for seed in seeds:
         s = scenario("cic_zd", seed)
         for _, c in best.iterrows():
             for cs in cseeds:
                 row = run(s, c.design, int(c.N), int(c.r), c.policy, int(c.R),
-                          c.channel == "bursty", 10 * seed + cs, c.impute)
-                row.update(seed=seed, cseed=cs)
+                          c.channel == "bursty", 10 * seed + cs, c.impute,
+                          c.repair)
+                row.update(seed=seed, cseed=cs, feasible=bool(c.feasible))
                 rows.append(row)
         print("eval seed", seed, flush=True)
     pd.DataFrame(rows).to_csv(RES / "e10_integrated.csv", index=False)
@@ -287,14 +356,14 @@ def sweep(seeds=range(5)):
         s = scenario("cic_zd", seed)
         for bursty in [False, True]:
             for design in ["MONO", "FIV+FEC-IL"]:
-                for pol, R, imp in CONFIGS:
+                for pol, R, imp, rep in CONFIGS[:3]:
                     b = 4 if pol == "aci" else 3
                     for N in NGRID:
                         if (N, b, design) not in par:
                             par[(N, b, design)] = header_parity(N, b, design,
                                                                 prng)
                         row = run(s, design, N, par[(N, b, design)], pol, R,
-                                  bursty, 2000 + seed, imp)
+                                  bursty, 2000 + seed, imp, rep)
                         row.update(seed=seed)
                         rows.append(row)
         print("sweep seed", seed, flush=True)
@@ -305,5 +374,7 @@ if __name__ == "__main__":
     import sys
     if "sweep" in sys.argv:
         sweep()
+    elif "evaluate" in sys.argv:
+        evaluate(pd.read_csv(RES / "e10_tuning.csv"))
     else:
         evaluate(tune())

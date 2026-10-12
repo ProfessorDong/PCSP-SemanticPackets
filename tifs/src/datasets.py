@@ -224,6 +224,7 @@ def cicids(seed: int = 0, n_iid: int = 300_000, frac=(0.6, 0.2, 0.2),
                    Xca_t=X(e_ca), yca_t=e_ca.y.to_numpy(),
                    Xsh=X(l_sh), ysh=l_sh.y.to_numpy())
         out["raw_bytes_sh"] = _cic_wire_bytes(l_sh)
+        out["day_sh"] = l_sh.day.to_numpy()     # day-file index per claim
     return out
 
 

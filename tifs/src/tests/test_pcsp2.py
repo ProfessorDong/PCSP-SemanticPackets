@@ -61,7 +61,7 @@ def test_accept_and_attacks():
     assert rx.verify(b0, 10) == (True, "ok")
     assert rx.verify(b0, 10)[1] == P.G_REPLAY          # in-window replay
     b1 = tx.encode(cl, ev, t=11)
-    bad = P.Batch(b1.hdr, [P.Claim(4, 0, cl[0].cert)] + cl[1:], b1.sigma)
+    bad = P.Batch(b1.hdr, [P.Claim(4, 0, P.setmask([4], 5))] + cl[1:], b1.sigma)
     assert rx.verify(bad, 11)[1] == P.G_SIG             # claim tamper
     bad = P.Batch(replace(b1.hdr, N=7), cl[:7], b1.sigma)
     assert rx.verify(bad, 11)[1] == P.G_SIG             # truncation
@@ -106,7 +106,7 @@ def test_challenge_authentication():
     k = b"r" * 32
     c = P.make_challenge(k, 1, 7, 3)
     assert len(c) == P.AUDIT_CHALLENGE_BYTES
-    assert P.check_challenge(k, c) == (1, 7, 3)
+    assert P.check_challenge(k, c) == (1, 7, 3, 0, 0xFF)
     assert P.check_challenge(b"x" * 32, c) is None
     assert P.check_challenge(k, c[:-1] + bytes([c[-1] ^ 1])) is None
 
@@ -166,6 +166,97 @@ def test_fiv_overlap_and_revocation():
     rx2.keys.pop((1, 0))                                           # revoke
     assert P.fiv_accept_fragment(rx2, 1, f2[1], 1, 5) is None
     assert P.fiv_accept_fragment(rx2, 1, f2[1], 7, 5) is None      # bad k
+
+
+def test_claim_bound_to_certificate():
+    """G4 rejects a claim whose z disagrees with its certificate: z outside
+    the set (set mode) or not the lowest-index maximizer (score mode)."""
+    sig, tx, rx, cl, ev = _setup()
+    bad = [P.Claim(1, 0, P.setmask([2], 5))] + cl[1:]
+    b = tx.encode(bad, ev, t=5)
+    assert rx.verify(b, 5) == (False, P.G_STRUCT)
+    assert not P.claim_well_formed(P.Claim(1, 0, bytes([200, 55])),
+                                   P.MODE_SCORE, 2)
+    assert P.claim_well_formed(P.Claim(0, 0, bytes([200, 55])),
+                               P.MODE_SCORE, 2)
+    assert P.claim_well_formed(P.Claim(0, 0, bytes([128, 128])),
+                               P.MODE_SCORE, 2)          # tie: lowest index
+    assert not P.claim_well_formed(P.Claim(1, 0, bytes([128, 128])),
+                                   P.MODE_SCORE, 2)
+
+
+def test_fiv_registry_replacement():
+    """Pending FIV claims are not accepted after the bundle or the key is
+    replaced under the same identifier."""
+    sig, tx, rx, cl, ev = _setup(N=4)
+    b = tx.encode(cl, ev, t=5)
+    hs, fr = P.fiv_encode(b, 0, 0)
+    rx2 = P.Receiver(sig, dict(rx.keys), dict(rx.bundles))
+    assert P.fiv_verify_header(rx2, hs, 0, 5)[0]
+    assert P.fiv_accept_fragment(rx2, 1, fr[0], 0, 5) is not None
+    old = rx2.bundles[0]
+    rx2.bundles[0] = P.Bundle(P.H(b"other model"), old.H_D, old.mode, old.K,
+                              old.alpha_code)            # same index, new model
+    assert P.fiv_accept_fragment(rx2, 1, fr[1], 0, 5) is None
+    rx3 = P.Receiver(sig, dict(rx.keys), dict(rx.bundles))
+    assert P.fiv_verify_header(rx3, hs, 0, 5)[0]
+    rx3.keys[(1, 0)] = sig.keygen()[1]                   # same key id, new key
+    assert P.fiv_accept_fragment(rx3, 1, fr[1], 0, 5) is None
+
+
+def test_opening_repair_two_endpoints():
+    """Serialized challenge/repair exchange between a sender and a receiver
+    over a channel that drops challenges and opening fragments: the
+    reassembled opening verifies, every round discloses the same bytes,
+    replayed challenges get no answer, and the byte counts match the
+    accounting of exp_integrated (26-B challenges, ceil(a / (mu - 9))
+    fragments of at most mu bytes)."""
+    import random
+    sig, tx, rx, cl, ev = _setup(N=16)
+    ev = [bytes([i]) * 312 for i in range(16)]
+    k_rs = b"r" * 32
+    mu = 200
+    b = tx.encode(cl, ev, t=5)
+    assert rx.verify(b, 5)[0]
+    a_len = len(tx.open_bytes(b, 3))
+    assert a_len == P.audit_response_bytes(312, 16)
+    nf = P.n_opening_fragments(a_len, mu)
+    rng = random.Random(1)
+    done = 0
+    for trial in range(300):
+        srv = P.OpeningServer(tx, k_rs, mu, max_rounds=4, deadline=100)
+        srv.keep(b, 5)
+        col = P.OpeningCollector(k_rs, 1, b.hdr.seq, 3)
+        sent = []
+        for rnd in range(4):
+            ch = col.challenge()
+            assert len(ch) == P.AUDIT_CHALLENGE_BYTES == 26
+            if rng.random() < 0.3:
+                continue                                  # challenge lost
+            out = srv.answer(ch, 6)
+            assert srv.answer(ch, 6) == []                # replay: no answer
+            for f in out:
+                assert len(f) <= mu
+                sent.append(f)
+                if rng.random() >= 0.3:
+                    col.receive(f)
+            if col.complete() is not None:
+                break
+        got = col.complete()
+        if got is not None:
+            done += 1
+            assert got == tx.open_bytes(b, 3)
+            sid, seq, i, x, salt, path = P.parse_opening(got)
+            assert rx.check_audit(b, i, x, salt, path)
+        # each fragment index is sent again only if it was requested again
+        assert all(len(f) <= mu for f in sent)
+        assert len({f for f in sent}) <= nf
+    assert done > 200
+    # no answer after the deadline or beyond the round limit
+    srv = P.OpeningServer(tx, k_rs, mu, max_rounds=4, deadline=100)
+    srv.keep(b, 5)
+    assert srv.answer(P.make_challenge(k_rs, 1, b.hdr.seq, 3, 0), 200) == []
+    assert srv.answer(P.make_challenge(k_rs, 1, b.hdr.seq, 3, 4), 6) == []
 
 
 if __name__ == "__main__":

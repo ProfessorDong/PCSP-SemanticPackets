@@ -43,6 +43,16 @@ def shift_traces():
             "win_static": "ws", "win_aci0.01": "wa", "win_aci0.05": "wb"}))
 
 
+def day_files():
+    """First claim of each day file in the zero-day stream (seed 0)."""
+    import datasets as D
+    day = D.cicids(0)["day_sh"]
+    starts = [int(np.argmax(day == d)) + 1 for d in np.unique(day)]
+    for name, v in zip(["ThuAM", "ThuPM", "FriAM", "FriScan", "FriDDoS"],
+                       starts):
+        const(f"day{name}", v, "{:d}")
+
+
 def q_sweep():
     e = pd.read_csv(RES / "e3_shift.csv")
     for sc, tag in [("cic_zd", "cic"), ("nsl_shift", "nsl")]:
@@ -95,7 +105,8 @@ def bytes_():
     d = d[(d.scenario == "nsl_iid") & (d["mode"] == "SET")]
     for sch, tag in [("Falcon-512", "falcon"), ("ML-DSA-44", "mldsaA"),
                      ("ML-DSA-65", "mldsaB"), ("SLH-DSA-SHA2-128s", "slh")]:
-        dat(f"bytes_{tag}", d[d.scheme == sch][["N", "measured"]])
+        x = d[(d.scheme == sch) & (d.N & (d.N - 1) == 0)]   # powers of two
+        dat(f"bytes_{tag}", x[["N", "measured"]])
     nb = b[b.scenario == "nsl_iid"].iloc[0]
     cb = b[b.scenario == "cic_iid"].iloc[0]
     const("bytesNSLraw", nb.raw_mean)
@@ -111,11 +122,26 @@ def channel():
     exact i.i.d. expectations, Monte Carlo with 95% intervals."""
     c = pd.read_csv(RES / "e7_fig.csv")
     d = c[(c.b == 3) & (c.eps == 0.1)]
+    YMIN = 0.05                     # lower edge of the log axis
+    zero = []
     for mode, mt in [("MONO", "mono"), ("FIV", "fiv"),
                      ("FIV+FEC", "fec"), ("FIV+FEC-IL", "il")]:
-        g = d[d["mode"] == mode]
-        dat(f"chan_{mt}", g[["N", "exact", "mc_iid", "ci_iid", "mc_ge",
-                             "ci_ge"]])
+        g = d[d["mode"] == mode].copy()
+        for tag in ["iid", "ge"]:
+            # asymmetric 95% intervals (exact binomial for MONO); a point
+            # whose Monte Carlo estimate is zero cannot be drawn on the log
+            # axis and is shown by its upper confidence bound instead
+            z = g[f"mc_{tag}"] <= 0
+            for _, r in g[z].iterrows():
+                zero.append(dict(N=r.N, hi=r[f"hi_{tag}"], ch=tag, mode=mode))
+            g[f"ep_{tag}"] = g[f"hi_{tag}"] - g[f"mc_{tag}"]
+            g[f"em_{tag}"] = g[f"mc_{tag}"] - np.maximum(g[f"lo_{tag}"], YMIN)
+            g.loc[z, [f"mc_{tag}", f"ep_{tag}", f"em_{tag}"]] = np.nan
+        dat(f"chan_{mt}", g[["N", "exact", "mc_iid", "ep_iid", "em_iid",
+                             "mc_ge", "ep_ge", "em_ge"]])
+    zero = pd.DataFrame(zero, columns=["N", "hi", "ch", "mode"])
+    dat("chan_zero_iid", zero[zero.ch == "iid"][["N", "hi"]])
+    dat("chan_zero_ge", zero[zero.ch == "ge"][["N", "hi"]])
     o = pd.read_csv(RES / "e7_opt.csv")
     o = o[(o.b == 3) & (o.eps == 0.1)].iloc[0]
     const("chanNopt", o.N_relaxed)
@@ -177,6 +203,7 @@ def tolerance():
 
 if __name__ == "__main__":
     shift_traces()
+    day_files()
     q_sweep()
     evasion()
     selective()

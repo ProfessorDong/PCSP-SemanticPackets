@@ -21,7 +21,7 @@ H(theta), H(D) come from the approved bundle Pi[bundle]; the bundle
 index itself is signed, and Pi[bundle] fixes (mode, K, alpha_code), which
 the receiver checks against the header.
 
-Trees: RFC 6962 (leaf 0x00, node 0x01, largest-power-of-two split).
+Trees: RFC 9162 (leaf 0x00, node 0x01, largest-power-of-two split).
 Claim leaves: "PCSP-v2-claim" || i(2) || claim body.
 Evidence leaves (salted): "PCSP-v2-evid" || sid || seq || i || r_i || H(X_i),
 r_i = HMAC-SHA256(k_salt, seq || i)[:16], revealed only in audit openings.
@@ -294,15 +294,23 @@ def parse_batch(data: bytes, sig_len: int | tuple[int, int]) -> Batch:
     return Batch(h, claims, bytes(data[body_end:]))
 
 
+def top1(cert: bytes) -> int:
+    """Lowest-index maximizer of an 8-bit score vector."""
+    return max(range(len(cert)), key=lambda c: (cert[c], -c))
+
+
 def claim_well_formed(c: Claim, mode: int, K: int) -> bool:
-    """Range checks of G4: top-1 label below K and, in set mode, no mask
-    bit set beyond class K-1 (an empty mask is well formed; its set is
-    not a singleton, so the claim is escalated)."""
+    """Checks of G4: top-1 label below K, certificate length fixed by
+    (mode, K), and the claim bound to its certificate: in score mode z
+    must be the lowest-index maximizer of the scores, in set mode z must
+    belong to the set (every set contains z, so it is never empty) and no
+    mask bit may be set beyond class K-1."""
     if c.z >= K or len(c.cert) != claim_bytes(mode, K) - 2:
         return False
     if mode == MODE_SET:
-        return int.from_bytes(c.cert, "big") >> K == 0
-    return True
+        m = int.from_bytes(c.cert, "big")
+        return m >> K == 0 and (m >> c.z) & 1 == 1
+    return top1(c.cert) == c.z
 
 
 @dataclass
@@ -376,28 +384,126 @@ def audit_response_bytes(B_x: float, N: int) -> float:
 
 
 CHAL_TAG_LEN = 16
-AUDIT_CHALLENGE_BYTES = 2 + 4 + 2 + CHAL_TAG_LEN   # slot id + MAC tag
+AUDIT_CHALLENGE_BYTES = 2 + 4 + 2 + 1 + 1 + CHAL_TAG_LEN
+#   slot id (sid, seq, i), round, missing-fragment bitmap, MAC tag = 26 B
+OPEN_FRAG_HDR = 2 + 4 + 2 + 1      # slot id, (fragment index, count) nibbles
+MAX_OPEN_FRAGS = 8                 # bitmap width
 
 
-def make_challenge(k_rs: bytes, sid: int, seq: int, i: int) -> bytes:
-    """Receiver-to-sender challenge authenticated with a pairwise key
-    established at enrollment, so that third parties cannot induce
-    openings."""
-    body = struct.pack(">HIH", sid, seq, i)
+def make_challenge(k_rs: bytes, sid: int, seq: int, i: int, rnd: int = 0,
+                   need: int = 0xFF) -> bytes:
+    """Receiver-to-sender audit challenge, authenticated with a pairwise
+    key established at enrollment so that third parties cannot induce
+    openings.  Round `rnd` = 0 requests the opening; a later round is a
+    repair request whose bitmap `need` names the opening fragments the
+    receiver still lacks (bit f = fragment f).  The challenge is the only
+    feedback: the receiver knows which fragments arrived, so no
+    acknowledgment from the sender is needed."""
+    body = struct.pack(">HIHBB", sid, seq, i, rnd, need)
     return body + hmac.new(k_rs, b"PCSP-v2-chal" + body,
                            hashlib.sha256).digest()[:CHAL_TAG_LEN]
 
 
 def check_challenge(k_rs: bytes, chal: bytes):
-    """Return the slot (sid, seq, i) of an authentic challenge, or None."""
+    """Return (sid, seq, i, rnd, need) of an authentic challenge, or None."""
     if len(chal) != AUDIT_CHALLENGE_BYTES:
         return None
-    body = chal[:8]
+    body = chal[:-CHAL_TAG_LEN]
     tag = hmac.new(k_rs, b"PCSP-v2-chal" + body,
                    hashlib.sha256).digest()[:CHAL_TAG_LEN]
-    if not hmac.compare_digest(tag, chal[8:]):
+    if not hmac.compare_digest(tag, chal[-CHAL_TAG_LEN:]):
         return None
-    return struct.unpack(">HIH", body)
+    return struct.unpack(">HIHBB", body)
+
+
+def opening_fragments(opening: bytes, sid: int, seq: int, i: int,
+                      mu: int) -> list[bytes]:
+    """Split a framed opening into fragments of at most mu bytes, each
+    carrying the slot id and its (index, count) so that it can be
+    reassembled and repaired independently."""
+    pay = mu - OPEN_FRAG_HDR
+    parts = [opening[o:o + pay] for o in range(0, len(opening), pay)]
+    n = len(parts)
+    if n > MAX_OPEN_FRAGS:
+        raise ValueError("opening needs more fragments than the bitmap")
+    return [struct.pack(">HIHB", sid, seq, i, f << 4 | n) + p
+            for f, p in enumerate(parts)]
+
+
+def n_opening_fragments(a_len: int, mu: int) -> int:
+    return -(-a_len // (mu - OPEN_FRAG_HDR))
+
+
+class OpeningServer:
+    """Sender side of the audit exchange.  The opening of a slot is built
+    once and cached until the audit deadline, so every round discloses the
+    same bytes.  An authentic challenge is answered with the fragments its
+    bitmap requests; a challenge whose (slot, round) was already answered,
+    a round beyond max_rounds, or an expired slot gets no answer, so
+    replayed challenges cannot make the sender transmit more."""
+
+    def __init__(self, tx: "Transmitter", k_rs: bytes, mu: int,
+                 max_rounds: int = 4, deadline: int = 100):
+        self.tx, self.k_rs, self.mu = tx, k_rs, mu
+        self.max_rounds, self.deadline = max_rounds, deadline
+        self.batches: dict[int, tuple["Batch", int]] = {}
+        self.cache: dict[tuple, list[bytes]] = {}
+        self.answered: set[tuple] = set()
+
+    def keep(self, batch: "Batch", t_emit: int):
+        self.batches[batch.hdr.seq] = (batch, t_emit)
+
+    def answer(self, chal: bytes, t_now: int) -> list[bytes]:
+        c = check_challenge(self.k_rs, chal)
+        if c is None:
+            return []
+        sid, seq, i, rnd, need = c
+        if sid != self.tx.sid or seq not in self.batches:
+            return []
+        batch, t_emit = self.batches[seq]
+        if t_now > t_emit + self.deadline or rnd >= self.max_rounds \
+                or (seq, i, rnd) in self.answered or not 0 <= i < batch.hdr.N:
+            return []
+        self.answered.add((seq, i, rnd))
+        if (seq, i) not in self.cache:
+            self.cache[(seq, i)] = opening_fragments(
+                self.tx.open_bytes(batch, i), sid, seq, i, self.mu)
+        fr = self.cache[(seq, i)]
+        return [f for k, f in enumerate(fr) if need >> k & 1]
+
+
+class OpeningCollector:
+    """Receiver side: reassembles the fragments of one audited slot and
+    produces the next repair challenge (the bitmap of missing fragments)."""
+
+    def __init__(self, k_rs: bytes, sid: int, seq: int, i: int):
+        self.k_rs, self.slot = k_rs, (sid, seq, i)
+        self.parts: dict[int, bytes] = {}
+        self.n = None
+        self.rnd = 0
+
+    def challenge(self) -> bytes:
+        need = 0xFF if self.n is None else sum(
+            1 << f for f in range(self.n) if f not in self.parts)
+        c = make_challenge(self.k_rs, *self.slot, self.rnd, need)
+        self.rnd += 1
+        return c
+
+    def receive(self, frag: bytes):
+        if len(frag) < OPEN_FRAG_HDR:
+            return
+        sid, seq, i, fn = struct.unpack(">HIHB", frag[:OPEN_FRAG_HDR])
+        f, n = fn >> 4, fn & 0xF
+        if (sid, seq, i) != self.slot or f >= n or \
+                (self.n is not None and n != self.n):
+            return
+        self.n = n
+        self.parts.setdefault(f, bytes(frag[OPEN_FRAG_HDR:]))
+
+    def complete(self) -> bytes | None:
+        if self.n is None or len(self.parts) < self.n:
+            return None
+        return b"".join(self.parts[f] for f in range(self.n))
 
 
 def parse_opening(data: bytes):
@@ -611,8 +717,11 @@ def fiv_verify_header(rx: Receiver, hdr_stream: bytes, j: int, t_now: int):
         return False, h, None
     w.commit(h.seq)
     rx.n_emitted[h.sid] = max(rx.n_emitted.get(h.sid, 0), h.cnt + h.N)
+    # the registration pins the full approved bundle and the public key it
+    # was verified under, so that a later replacement under the same index
+    # or key identifier cannot carry the pending claims
     rx.fiv_state[(h.sid, h.seq)] = dict(h=h, roots=roots, j=j, k=None,
-                                        acc=0)
+                                        acc=0, bundle=b, pk=pk)
     return True, h, roots
 
 
@@ -636,11 +745,11 @@ def fiv_accept_fragment(rx: Receiver, sid: int, frag: bytes, k: int,
     if abs(t_now - h.t) > rx.policy.tau:
         del rx.fiv_state[(sid, seq)]
         return None
-    # a key action or a bundle withdrawal after registration also stops
-    # the claims of batches registered earlier
-    b = rx.bundles.get(h.bundle)
-    if (h.sid, h.kid) not in rx.keys or b is None or \
-            (b.mode, b.K, b.alpha_code) != (h.mode, h.K, h.alpha_code):
+    # a key action, a bundle withdrawal, or a replacement of the bundle or
+    # key under the same identifier after registration also stops the
+    # claims of batches registered earlier
+    if rx.bundles.get(h.bundle) != st["bundle"] or \
+            rx.keys.get((h.sid, h.kid)) != st["pk"]:
         del rx.fiv_state[(sid, seq)]
         return None
     n = h.N.bit_length() - 1

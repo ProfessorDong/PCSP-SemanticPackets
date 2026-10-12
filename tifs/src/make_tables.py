@@ -113,7 +113,7 @@ def shift():
 
 def crypto():
     b = pd.read_csv(RES / "pqc_bench.csv")
-    b = b[(b.msg_bytes == 96) & (b.impl == "liboqs")]
+    b = b[(b.msg_bytes == 160) & (b.impl == "liboqs")]   # |M| = 160 B
     lat = pd.read_csv(RES / "e8_latency.csv")
     by = pd.read_csv(RES / "e6_bytes.csv")
     rows = [("ML-DSA-44", "ML-DSA-44", 2), ("ML-DSA-65", "ML-DSA-65", 3),

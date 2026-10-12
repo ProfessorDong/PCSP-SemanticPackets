@@ -367,6 +367,32 @@ def mc_matrix(N, b, B_o, M, eps, mode, r, rng, trials, bursty, interleave):
 BURST_GE = 8
 
 
+def batch_interval(got, N, mode, level=0.95):
+    """95% interval for the mean verified claims per batch.  A MONO batch
+    delivers N claims or none, so the count of surviving batches is
+    binomial and the exact Clopper-Pearson interval for the survival
+    probability, scaled by N, is used; it stays nondegenerate when no batch
+    survives.  FIV rewards are batch-level totals (claims of one batch are
+    not independent replications); a normal interval over the batch totals
+    is used, with the exact interval for the header-recovery indicator as
+    a fallback when fewer than 30 batches delivered anything."""
+    from scipy.stats import beta
+    n = len(got)
+    a = 1 - level
+    if mode == "MONO" or (got > 0).sum() < 30:
+        k = int((got > 0).sum())
+        lo = beta.ppf(a / 2, k, n - k + 1) if k > 0 else 0.0
+        hi = beta.ppf(1 - a / 2, k + 1, n - k) if k < n else 1.0
+        if mode == "MONO":
+            return N * lo, N * hi
+        # conservative: a delivering batch carries between its smallest
+        # observed positive total and N claims
+        cmin = got[got > 0].min() if k else 0
+        return cmin * lo, N * hi
+    h = 1.96 * got.std(ddof=1) / np.sqrt(n)
+    return max(0.0, got.mean() - h), got.mean() + h
+
+
 def e7fig(trials=2000):
     rng_t = np.random.default_rng(71)      # tuning draws
     rng_e = np.random.default_rng(72)      # evaluation draws
@@ -403,8 +429,10 @@ def e7fig(trials=2000):
                         kb = fr * (M + FRAME_HDR) / 1000
                         tag = "ge" if bursty else "iid"
                         row[f"mc_{tag}"] = got.mean() / kb
-                        row[f"ci_{tag}"] = 1.96 * got.std(ddof=1) / \
-                            np.sqrt(trials) / kb
+                        lo, hi = batch_interval(got, N, mode)
+                        row[f"lo_{tag}"] = lo / kb
+                        row[f"hi_{tag}"] = hi / kb
+                        row[f"nz_{tag}"] = int((got > 0).sum())
                     rows.append(row)
         print("e7fig b", b, flush=True)
     pd.DataFrame(rows).to_csv(RES / "e7_fig.csv", index=False)
