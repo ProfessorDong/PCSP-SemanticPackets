@@ -35,5 +35,15 @@ export OQS_INSTALL_PATH=$PWD/.venv/oqs
 
 * NSL-KDD: the official `KDDTrain+.txt` (125,973 rows,
   sha256 `1b86d2f9...aadf95`) and `KDDTest+.txt` in `sim/data/nslkdd_official/`.
-* CIC-IDS-2017: `MachineLearningCSV.zip` from UNB CIC expanded into
+* CIC-IDS-2017 (default): the corrected release of Liu, Engelen, Lynar,
+  Essam, and Joosen (IEEE CNS 2022), `CICIDS2017_improved.zip` from
+  <https://intrusion-detection.distrinet-research.be/CNS2022/Datasets/>
+  (sha256 `97fdb91d...03c48883`), expanded into
+  `sim/data/cicids2017_improved/` (five day CSVs with timestamps).
+  Attempted attacks are relabeled benign, as the dataset authors recommend;
+  "Infiltration - Portscan" counts as port scan; Web attacks, Infiltration,
+  and Botnet form one rare-attack class (six classes); the zero-day stream
+  is in timestamp order.
+* CIC-IDS-2017 (original release, `PCSP_CIC_RELEASE=original`):
+  `MachineLearningCSV.zip` from UNB CIC expanded into
   `sim/data/cicids2017/MachineLearningCVE/`.

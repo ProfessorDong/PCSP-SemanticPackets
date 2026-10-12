@@ -70,7 +70,7 @@ def main():
 
 def recompute():
     """Audit recomputation cost: CPU inference of the approved XGBoost
-    model on one opened 78-feature flow (and per flow in a 1024 batch),
+    model on one opened 83-feature flow (and per flow in a 1024 batch),
     pinned to one core.  Output: results/e8_recompute.csv"""
     import xgboost as xgb
     from common import scenario

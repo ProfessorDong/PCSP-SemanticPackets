@@ -1,7 +1,7 @@
 """
 E9  Intrusion tolerance: a compromised authorized sender in score mode.
 
-The day-ordered zero-day CIC-IDS-2017 stream is produced by n_s = 5 senders
+The time-ordered zero-day CIC-IDS-2017 stream is produced by n_s = 5 senders
 with equal shares.  Sender 0 is compromised and colludes with the intruder:
 for the attack flows it reports, it signs the certificate (255, 0), i.e.
 confidently "benign".  Four quantities are kept apart:

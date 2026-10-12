@@ -2,7 +2,7 @@
 E10  Integrated decision-level performability (Definition 2), simulated
 causally on one timeline instead of composed from separate experiments.
 
-Stream: day-ordered zero-day CIC-IDS-2017 (binary), one sender, alpha = 0.01;
+Stream: time-ordered zero-day CIC-IDS-2017 (binary), one sender, alpha = 0.01;
         every design and batch size evaluates the same first T0 = 196,608
         claims (divisible by every N in the grid), so that all compared
         configurations see identical observations.
@@ -20,7 +20,7 @@ Per batch:
      missing-fragment bitmap, MAC) on the reverse link (i.i.d. loss eps);
   3. the sender answers from its cached opening (pcsp2.OpeningServer) with
      the requested fragments, each a 9-B fragment header plus at most
-     mu - 9 bytes of the framed opening (10-B header, 312-B evidence, 16-B
+     mu - 9 bytes of the framed opening (10-B header, 332-B evidence, 16-B
      salt, log2 N path hashes); after a retransmission timer of BACKOFF
      frame times, during which the channel carries other traffic, the
      receiver sends the next round with the bitmap of the fragments still
@@ -71,7 +71,7 @@ BURST = 8
 ALPHA = 0.01
 GAMMA = 0.01
 DELAY = 100
-B_X = 312
+B_X = 332                    # 83 float32 flow features (corrected release)
 B_O = P.batch_overhead(SIG_BYTES["ML-DSA-65"])
 NGRID = [64, 128, 256, 512, 1024, 2048, 4096]
 T0 = 196_608                 # common horizon, divisible by every N in NGRID
@@ -173,6 +173,7 @@ def quarantine_index(timeout):
 
 def run(s, design, N, r, policy, R, bursty, cseed, impute="level",
         repair="selective"):
+    assert 4 * s["X"].shape[1] == B_X, "evidence size does not match data"
     y = s["y"][:T0]
     T = T0
     Q = C.quantize(s["P"][:T])

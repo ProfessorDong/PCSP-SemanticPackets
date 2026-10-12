@@ -14,14 +14,23 @@ NSL-KDD: official KDDTrain+ (125,973 rows) and KDDTest+ (22,544 rows).
 The i.i.d. folds are drawn from KDDTrain+; KDDTest+ is the shifted
 deployment stream (it contains attack types absent from training).
 
-CIC-IDS-2017: the eight MachineLearningCVE day files (2,830,743 rows
-before cleaning).  The i.i.d. folds are a stratified-by-seed sample;
-the temporal stream is Thursday + Friday traffic with the model
-trained and calibrated on Monday--Wednesday.
+CIC-IDS-2017: by default the corrected release of Liu, Engelen et al.
+(IEEE CNS 2022; CICIDS2017_improved.zip, five day files, 2,099,976 rows,
+regenerated with the fixed CICFlowMeter and relabeled).  Flows labeled
+"X - Attempted" carry no attack behavior and are relabeled benign, as the
+dataset authors recommend; "Infiltration - Portscan" (scans launched from
+the infiltrated host) maps to portscan.  Flows are put in timestamp order.
+Set PCSP_CIC_RELEASE=original for the eight MachineLearningCVE day files
+of the original release.  Web attacks, Infiltration, and Botnet form one
+rare-attack class in the corrected release (six classes).  The i.i.d.
+folds are a random sample per seed;
+the temporal stream is Thursday + Friday traffic with the model trained
+and calibrated on Monday--Wednesday.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -127,7 +136,27 @@ _CIC_MAP = {
     "ssh-patator": "brute_force", "web attack brute force": "web_attack",
     "web attack xss": "web_attack", "web attack sql injection": "web_attack",
     "bot": "bot_infil", "infiltration": "bot_infil",
+    # corrected release (CNS 2022) label names
+    "botnet": "bot_infil", "infiltration portscan": "portscan",
 }
+CIC_RELEASE = os.environ.get("PCSP_CIC_RELEASE", "improved")
+assert CIC_RELEASE in ("improved", "original"), CIC_RELEASE
+if CIC_RELEASE == "improved":
+    # Without the attempted flows only 104 Web-attack flows remain (36
+    # Infiltration, 736 Botnet), too few for a class of their own in a
+    # 300,000-flow sample: they form one rare-attack class.
+    CIC_CLASSES = ["benign", "dos", "ddos", "portscan", "brute_force",
+                   "web_bot_infil"]
+    _CIC_MAP = {k: ("web_bot_infil" if v in ("web_attack", "bot_infil")
+                    else v) for k, v in _CIC_MAP.items()}
+CIC_TAG = "imp" if CIC_RELEASE == "improved" else ""   # cache-key suffix
+CIC_IMP_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday"]
+# identifiers and bookkeeping columns of the corrected release that are not
+# flow features (the original release likewise has no addresses, source
+# port, or timestamp)
+_CIC_IMP_DROP = ["id", "Flow ID", "Src IP", "Dst IP", "Src Port",
+                 "Timestamp", "Label", "Attempted Category"]
+_META = ("y", "day", "row", "ts", "fam")
 CIC_DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday-WorkingHours-"
                  "Morning", "Thursday-WorkingHours-Afternoon",
                  "Friday-WorkingHours-Morning", "Friday-WorkingHours-"
@@ -140,8 +169,50 @@ def _norm(s):
     return " ".join(s.split())
 
 
+def _cic_frame_improved():
+    """Corrected release: five day files with timestamps, in time order."""
+    f = CACHE / "cicids2017_improved.parquet"
+    if f.exists():
+        return pd.read_parquet(f)
+    d = DATA / "cicids2017_improved"
+    frames = []
+    for i, key in enumerate(CIC_IMP_DAYS):
+        df = pd.read_csv(d / f"{key}.csv", low_memory=False)
+        df["day"] = i
+        frames.append(df)
+    df = pd.concat(frames, ignore_index=True)
+    att = df["Attempted Category"].to_numpy() != -1
+    lab = df["Label"].map(_norm)
+    # consistency of the two attempted markers
+    assert (lab.str.endswith(" attempted") == att).all()
+    lab = lab.where(~att, "benign")
+    unk = set(lab) - set(_CIC_MAP)
+    if unk:
+        raise ValueError(f"unmapped CIC labels: {sorted(unk)}")
+    fam = df["Label"].where(~att, "BENIGN")
+    ts = (pd.to_datetime(df["Timestamp"]).astype("datetime64[us]")
+          .astype("int64").to_numpy())             # microseconds since epoch
+    feats = [c for c in df.columns if c not in _CIC_IMP_DROP + ["day"]]
+    x = df[feats].to_numpy(np.float64)
+    ok = np.isfinite(x).all(axis=1)
+    out = df.loc[:, feats].astype(np.float32)
+    out["y"] = lab.map(_CIC_MAP).map(CIC_CLASSES.index).astype(np.int8)
+    out["day"] = df["day"].astype(np.int8)
+    out["row"] = df["id"].to_numpy()
+    out["ts"] = ts
+    out["fam"] = fam.to_numpy()
+    out = out.loc[ok]
+    # time order (timestamps are not sorted in the files); ties by file id
+    out = out.sort_values(["ts", "day", "row"], kind="mergesort")
+    out = out.reset_index(drop=True)
+    out.to_parquet(f)
+    return out
+
+
 def _cic_frame():
     CACHE.mkdir(parents=True, exist_ok=True)
+    if CIC_RELEASE == "improved":
+        return _cic_frame_improved()
     f = CACHE / "cicids2017.parquet"
     if f.exists():
         return pd.read_parquet(f)
@@ -171,15 +242,20 @@ def _cic_frame():
 
 
 def _cic_feats(df):
-    return [c for c in df.columns if c not in ("y", "day", "row")]
+    return [c for c in df.columns if c not in _META]
 
 
 def _cic_wire_bytes(df):
     """Per-flow on-wire evidence size: L4 payload plus L3/L4 headers in
     both directions, plus 14 B Ethernet framing per packet, i.e. the
     size of the flow's packet capture without pcap record headers."""
-    pkts = df["Total Fwd Packets"] + df["Total Backward Packets"]
-    pay = df["Total Length of Fwd Packets"] + df["Total Length of Bwd Packets"]
+    if "Total Fwd Packets" in df:                       # original release
+        pkts = df["Total Fwd Packets"] + df["Total Backward Packets"]
+        pay = (df["Total Length of Fwd Packets"]
+               + df["Total Length of Bwd Packets"])
+    else:                                               # corrected release
+        pkts = df["Total Fwd Packet"] + df["Total Bwd packets"]
+        pay = df["Total Length of Fwd Packet"] + df["Total Length of Bwd Packet"]
     hdr = (df["Fwd Header Length"].clip(lower=0)
            + df["Bwd Header Length"].clip(lower=0))
     return (pay + hdr + 14 * pkts).to_numpy(np.float64)
@@ -225,6 +301,9 @@ def cicids(seed: int = 0, n_iid: int = 300_000, frac=(0.6, 0.2, 0.2),
                    Xsh=X(l_sh), ysh=l_sh.y.to_numpy())
         out["raw_bytes_sh"] = _cic_wire_bytes(l_sh)
         out["day_sh"] = l_sh.day.to_numpy()     # day-file index per claim
+        if "fam" in l_sh:
+            out["fam_sh"] = l_sh.fam.to_numpy()  # original label per claim
+            out["ts_sh"] = l_sh.ts.to_numpy()
     return out
 
 

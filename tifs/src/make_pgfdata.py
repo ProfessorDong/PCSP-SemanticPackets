@@ -44,10 +44,21 @@ def shift_traces():
 
 
 def day_files():
-    """First claim of each day file in the zero-day stream (seed 0)."""
+    """Segment starts of the zero-day stream (seed 0).  Original release:
+    first claim of each day file.  Corrected release (one file per day):
+    first claim of Thursday, of the Thursday infiltration (scans from the
+    infiltrated host), of Friday, of the port scan, and of the DDoS."""
     import datasets as D
-    day = D.cicids(0)["day_sh"]
-    starts = [int(np.argmax(day == d)) + 1 for d in np.unique(day)]
+    c = D.cicids(0)
+    day = c["day_sh"]
+    if "fam_sh" in c:
+        fam = c["fam_sh"]
+        first = lambda f: int(np.argmax(fam == f)) + 1
+        starts = [1, first("Infiltration - Portscan"),
+                  int(np.argmax(day == 4)) + 1, first("Portscan"),
+                  first("DDoS")]
+    else:
+        starts = [int(np.argmax(day == d)) + 1 for d in np.unique(day)]
     for name, v in zip(["ThuAM", "ThuPM", "FriAM", "FriScan", "FriDDoS"],
                        starts):
         const(f"day{name}", v, "{:d}")

@@ -11,14 +11,15 @@ See [`tifs/README.md`](tifs/README.md). Relative to the earlier prototype in
 `sim/`, it
 
 * uses a redesigned wire format (PCSP v2: 3-B claims in set mode, a 53-B
-  signed header, separate RFC 6962 claim and evidence Merkle trees, salted
+  signed header, separate RFC 9162 claim and evidence Merkle trees, salted
   evidence commitments, a signed bundle index and claim counter);
 * implements the RFC 4303-style replay window, real serialization/parsing,
   and fragment-independent verification;
 * uses valid split-conformal certificates (LAC / randomized APS / Mondrian)
   and receiver-side, audit-driven adaptive conformal inference;
-* uses the official NSL-KDD `KDDTrain+` file (125,973 records) and all
-  CIC-IDS-2017 days, including a temporal zero-day split;
+* uses the official NSL-KDD `KDDTrain+` file (125,973 records) and the
+  corrected CIC-IDS-2017 release (Liu et al., IEEE CNS 2022), including a
+  time-ordered zero-day split;
 * measures FIPS 204 / FIPS 205 signatures from liboqs 0.16.0.
 
 `./tifs/run_all.sh` regenerates every result CSV.

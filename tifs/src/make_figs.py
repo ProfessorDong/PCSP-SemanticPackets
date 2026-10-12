@@ -177,8 +177,8 @@ def fig_bytes():
     nb = b[b.scenario == "nsl_iid"].iloc[0]
     cb = b[b.scenario == "cic_iid"].iloc[0]
     for v, lab, ls in [(nb.raw_mean, "NSL-KDD native record (128 B)", "--"),
-                       (cb.feat_bytes, "CIC flow features (312 B)", "-."),
-                       (cb.raw_median, "CIC flow on-wire, median (364 B)", ":"),
+                       (cb.feat_bytes, f"CIC flow features ({cb.feat_bytes:.0f} B)", "-."),
+                       (cb.raw_median, f"CIC flow on-wire, median ({cb.raw_median:.0f} B)", ":"),
                        (b[(b.scenario == "nsl_iid") & (b.N == 128)].evid_zlib_mean.iloc[0],
                         "NSL-KDD record, zlib, N=128 (18.7 B)", (0, (1, 1)))]:
         ax.axhline(v, color=INK2, ls=ls, lw=0.9, label=lab)

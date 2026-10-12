@@ -4,6 +4,7 @@ Scenarios
   nsl_iid    NSL-KDD, KDDTrain+ folds (exchangeable)
   nsl_shift  NSL-KDD, trained/calibrated on KDDTrain+, deployed on KDDTest+
   cic_iid    CIC-IDS-2017, 7 classes, random folds over all five days
+             (corrected release by default, see datasets.py)
   cic_zd     CIC-IDS-2017 binary (benign/attack), trained and calibrated on
              Mon-Wed, deployed on a time-ordered Thu-Fri stream (zero-day
              attack families)
@@ -29,7 +30,8 @@ def scenario(name: str, seed: int = 0) -> dict:
     """Return dict(Pca, yca, P, y, K, raw_bytes, X (deployment features),
     clf, classes)."""
     PCACHE.mkdir(parents=True, exist_ok=True)
-    f = PCACHE / f"{name}_s{seed}.npz"
+    sfx = D.CIC_TAG if name.startswith("cic") else ""
+    f = PCACHE / f"{name}{sfx}_s{seed}.npz"
     need_model = True
     if name.startswith("nsl"):
         d = D.nslkdd(seed)
@@ -43,7 +45,7 @@ def scenario(name: str, seed: int = 0) -> dict:
         d = D.cicids(seed, temporal=False)
         Xtr, ytr, Xca, yca = d["Xtr"], d["ytr"], d["Xca"], d["yca"]
         X, y, rb, ev = d["Xte"], d["yte"], d["raw_bytes_te"], d["evid_te"]
-        K, classes = 7, d["classes"]
+        K, classes = len(d["classes"]), d["classes"]
     elif name == "cic_zd":
         d = D.cicids(seed, temporal=True)
         b = lambda v: (v > 0).astype(np.int64)
@@ -54,7 +56,7 @@ def scenario(name: str, seed: int = 0) -> dict:
     else:
         raise ValueError(name)
     clf = Mo.train_xgb(Xtr, ytr, K, seed=seed, tag=name.split("_")[0]
-                       + ("zd" if name == "cic_zd" else ""))
+                       + ("zd" if name == "cic_zd" else "") + sfx)
     if f.exists():
         z = np.load(f)
         Pca, P = z["Pca"], z["P"]
