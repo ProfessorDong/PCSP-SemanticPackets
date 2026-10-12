@@ -142,16 +142,15 @@ All four backends implement the same `SigBackend` interface, so
 
 ## Citation
 
-If you use this code, please cite:
+If you use this code, please cite the repository (a journal version is in preparation):
 
 ```bibtex
-@inproceedings{dong_pcsp_milcom2026,
-  author    = {Liang Dong},
-  title     = {{Proof-Carrying Semantic Packets for Zero-Trust
-                Tactical Edge Networks Under Bandwidth Collapse}},
-  booktitle = {Proc. IEEE Military Communications Conference (MILCOM)},
-  year      = {2026},
-  note      = {Withdrawn draft; not published}
+@misc{dong_pcsp_code,
+  author       = {Liang Dong},
+  title        = {{PCSP-SemanticPackets: Code and Measured Results for
+                   Proof-Carrying Semantic Packets}},
+  year         = {2026},
+  howpublished = {\url{https://github.com/ProfessorDong/PCSP-SemanticPackets}}
 }
 ```
 
@@ -159,4 +158,4 @@ If you use this code, please cite:
 
 Code released under the MIT License (see `LICENSE`).  The two
 datasets used in the paper are governed by their respective
-upstream licences (UNB CIC for NSL-KDD and CIC-IDS-2017).
+upstream licenses (UNB CIC for NSL-KDD and CIC-IDS-2017).
