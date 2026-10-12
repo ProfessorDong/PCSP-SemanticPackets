@@ -1,5 +1,5 @@
 """
-Run the PCSP attack-matrix experiments for MILCOM 2026 Paper 3.
+Run the PCSP attack-matrix experiments.
 
 Pipeline (single command, single CPU):
 
@@ -18,7 +18,7 @@ Pipeline (single command, single CPU):
 The signature backend can be `stub` (zero-cost placeholder), or
 `mldsa` / `slhdsa` (real liboqs once available).
 
-Author: Liang Dong, MILCOM 2026 Paper 3.
+Author: Liang Dong.
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """
-CIC-IDS-2017 loader for PCSP experiments (MILCOM 2026 Paper 3).
+CIC-IDS-2017 loader for PCSP experiments.
 
 CIC-IDS-2017 (Sharafaldin et al., 2018) is a labeled flow-level
 intrusion-detection benchmark built from 5 days of captured traffic
@@ -17,7 +17,7 @@ CSVs are loaded across all 8 day-files, concatenated, sub-sampled
 (by default to 200k rows) for fast experimentation, cleaned of
 NaN/Inf values, then split into train / calibration / test.
 
-Author: Liang Dong, MILCOM 2026 Paper 3.
+Author: Liang Dong.
 """
 
 from __future__ import annotations

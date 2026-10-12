@@ -14,7 +14,7 @@ with concrete implementations for `LibOQSBackend` (real ML-DSA-65 /
 SLH-DSA-SHA2-128s when liboqs is available) and `StubBackend`
 (zero-overhead placeholder for end-to-end pipeline testing).
 
-Author: Liang Dong, MILCOM 2026 Paper 3.
+Author: Liang Dong.
 """
 
 from __future__ import annotations

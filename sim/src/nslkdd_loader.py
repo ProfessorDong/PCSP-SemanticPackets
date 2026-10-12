@@ -1,5 +1,5 @@
 """
-NSL-KDD loader for PCSP experiments (MILCOM 2026 Paper 3).
+NSL-KDD loader for PCSP experiments.
 
 The NSL-KDD dataset (Tavallaee et al., 2009) refines the venerable
 KDD'99 intrusion-detection benchmark by removing duplicated records
@@ -18,7 +18,7 @@ Columns (NSL-KDD format):
 Five superclasses we collapse the 39 distinct attack labels into:
   normal, dos, probe, r2l (remote-to-local), u2r (user-to-root)
 
-Author: Liang Dong, MILCOM 2026 Paper 3.
+Author: Liang Dong.
 """
 
 from __future__ import annotations

@@ -15,7 +15,7 @@ Outputs:
   sim/results/sweep_bytes.csv     -- per (dataset, backend, N)
                                       measured B(P_N)/N
 
-Author: Liang Dong, MILCOM 2026 Paper 3.
+Author: Liang Dong.
 """
 
 from __future__ import annotations
